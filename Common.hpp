@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#define SINFO
+//#define SINFO
 
 #define NEXT_ALIGN(num,align) \
     ((num+align-1) & (~(align-1)))
@@ -41,6 +41,7 @@ static inline void link_lnode(lnode_t* a,lnode_t* b){
     b->prev = a;
 }
 
+// when you unline b from list then b point to itself
 static inline void unlink_lnode(lnode_t* b){
     lnode_t* prev = b->prev;
     if (prev==b)
@@ -51,6 +52,15 @@ static inline void unlink_lnode(lnode_t* b){
     b->next = b;
     b->prev = b;
 }
+
+#define sassert(x,s,...)                \
+do{                                     \
+    if (!(x)){                          \
+        printf("line:%d ",__LINE__);    \
+        printf(s,##__VA_ARGS__);        \
+    }                                   \
+}while(0)
+
 
 #define LEVELA 1
 #define LEVELB 2

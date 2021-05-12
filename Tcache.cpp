@@ -2,7 +2,7 @@
 
 atomic_bool arenas_inited = false;
 atomic_int no = -1;
-arena_t* arenas[CPUNUM_S];
+arena_t arenas[CPUNUM_S];
 
 std::size_t bigchunk_size;
 int cache_num[NBINS+NLBINS];
@@ -20,8 +20,9 @@ extern "C" {
 void thread_cleanup(void* arg){
     for (int i=0;i<NBINS+NLBINS;++i){
         tbin_t* tbin = &tc.bins[i];
-        for (int j=0;j<tbin->avail;++j)
+        for (int j=0;j<tbin->avail;++j){
             (i<NBINS)?dalloc_small(tc.arena,tbin->ptrs[j]):dalloc_large(tc.arena,tbin->ptrs[j]);
+        }
     }
     dalloc_huge(tc.arena,(void*)tc.bins[0].ptrs);
     atomic_fetch_sub(&tc.arena->threads,1);
@@ -31,7 +32,7 @@ void arenas_cleanup(){
     if (tc_inited)
         thread_cleanup(nullptr);
     for (int i=0;i<CPUNUM_S;++i)
-        destroy_arena(arenas[i]);
+        clear_arena(&arenas[i]);
 }
 
 void* smalloc(std::size_t size){
@@ -44,7 +45,7 @@ void* smalloc(std::size_t size){
                 // have to take care of main thread
                 atexit(arenas_cleanup);
                 for (int i=0;i<CPUNUM_S;++i)
-                    arenas[i] = new_arena();
+                    init_arena(&arenas[i]);
                 std::size_t _bigchunk_size = 0;
                 for (int i=0;i<NBINS+NLBINS;++i){
                     int ncached = max(CACHESIZE/regsize_to_bin[i],NCACHEDMIN);
@@ -61,7 +62,7 @@ void* smalloc(std::size_t size){
         }
         int myid = atomic_fetch_add(&no,1);
         myid %= CPUNUM_S;
-        arena_t* arena = arenas[myid];
+        arena_t* arena = &arenas[myid];
         tc.arena = arena;
         atomic_fetch_add(&arena->threads,1);
         void** chunk = (void**)alloc_huge(arena,bigchunk_size);
@@ -78,8 +79,14 @@ void* smalloc(std::size_t size){
                 *now = _ptr;
                 ++ptrnum;
             }
+        #if 0
+            (i<NBINS) ? alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,tbin->ncached)
+                      : alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,tbin->ncached);
+            ptrnum += tbin->ncached;
+        #endif
         }
         tc_inited = true;
+
     }
     int binid = size_class(size);
     if (binid!=-1){
@@ -91,6 +98,10 @@ void* smalloc(std::size_t size){
                 void* _ptr = (binid<NBINS)?alloc_small(tc.arena,tbin->size):alloc_large(tc.arena,tbin->size);
                 *now = _ptr;
             }
+        #if 0
+            (binid<NBINS) ? alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,fillnum)
+                          : alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,fillnum);
+        #endif
             tbin->avail += fillnum;
             slog(LEVELB,"fill tbin(%d),fill %d nums\n",binid,fillnum);
         }
@@ -116,7 +127,7 @@ void sfree(void* ptr){
     int binid = BINID(bs);
     tbin_t* tbin = &tc.bins[binid];
     if (tbin->avail==tbin->ncached){
-        int thrownum = tbin->avail>>2;
+        int thrownum = (tbin->avail<(1<<2)) ? tbin->avail : tbin->avail>>2;
         for (int i=0;i<thrownum;++i){
             void* nowptr = tbin->ptrs[tbin->avail-1];
             (type==SMALL)?dalloc_small(tc.arena,nowptr):dalloc_large(tc.arena,nowptr);

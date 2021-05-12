@@ -45,6 +45,9 @@ using mnode_t = struct mnode<T>;
 #define REGMIN 128
 #define REGMAX 512
 
+#define is_alignof(a,b) \
+    (a % b == 0)
+
 struct span{
     intptr_t start_pos;
 
@@ -205,11 +208,13 @@ int size_class(std::size_t size);
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr);
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid);
 
-arena_t* new_arena();
-void destroy_arena(arena_t* arena);
+void init_arena(arena_t* arena);
+void clear_arena(arena_t* arena);
 void* alloc_small(arena_t* arena,std::size_t size);
+void alloc_small_batch(arena_t* arena,std::size_t size,void** ptrs,int want);
 void dalloc_small(arena_t* arena,void* ptr);
 void* alloc_large(arena_t* arena,std::size_t size);
+void alloc_large_batch(arena_t* arena,std::size_t size,void** ptrs,int want);
 void dalloc_large(arena_t* arena,void* ptr);
 void* alloc_huge(arena_t* arena,std::size_t size);
 void dalloc_huge(arena_t* arena,void* ptr);

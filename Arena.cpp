@@ -72,8 +72,10 @@ void* chunk_alloc(std::size_t size,int align,std::size_t* tsize,bool exec){
     if (_addr==nullptr)
         return nullptr;
     intptr_t addr = (intptr_t)_addr;    
-    if ((addr&(align-1)) != 0)
+    if ((addr&(align-1)) != 0){
+        page_to_os(_addr,size);
         return chunk_alloc_slow(size,align,exec);
+    }
     return (void*)addr;
 }
 
@@ -91,7 +93,8 @@ void chunk_node_init(chunk_node_t* node,std::size_t size,intptr_t addr){
 }
 
 bool alloc_chunk_for_node(mnode_t<chunk_node_t>* cnodes){
-    std::size_t node_size = NEXT_ALIGN(sizeof(chunk_node_t),CACHELINE);
+    //std::size_t node_size = NEXT_ALIGN(sizeof(chunk_node_t),CACHELINE);
+    std::size_t node_size = sizeof(chunk_node_t);
     cnodes->nsize = node_size;
     cnodes->offset = node_size;
     chunk_node_t* chunk = (chunk_node_t*)chunk_alloc(CHUNKSIZE,CACHELINE,nullptr,false);
@@ -145,27 +148,23 @@ chunk_node_t* base_alloc(arena_t* arena,int align,std::size_t size,bool exec){
     void* _addr = chunk_alloc(size,align,&tsize,exec);
     if (_addr==nullptr)
         return nullptr;
-
     arena->all_size += tsize;
-
     intptr_t addr = (intptr_t)_addr;
     chunk_node_t* cnode = alloc_chunk_node(&arena->chunk_nodes);
     chunk_node_init(cnode,tsize,addr);
     return cnode;
 }
 
-#ifdef SPECIAL
 void base_dalloc(arena_t* arena,void* ptr){
     intptr_t addr = (intptr_t)ptr;
     chunk_node_t snode;
     chunk_node_init(&snode,0,addr);
     chunk_node_t* cnode = search_cnode(&arena->chunk_in_use,&snode.anode);
-    remove_cnode(&arena->chunk_in_use,&cnode->anode);
+    rb_delete(&arena->chunk_in_use,&cnode->anode);
     chunk_dalloc((void*)cnode->start_addr,cnode->chunk_size);
     arena->all_size -= cnode->chunk_size;
     dalloc_node(&arena->chunk_nodes,cnode);
 }
-#endif
 
 void cleanup_map(rb_tree_t<chunk_node_t>* tree){
     if (rb_empty(tree))
@@ -187,25 +186,17 @@ void cleanup_map(rb_tree_t<chunk_node_t>* tree){
     }
 }
 
-void cleanup_arena(arena_t* arena){
-    cleanup_map(&arena->chunk_cached_ad);
+void clear_arena(arena_t* arena){
+    while (atomic_load(&arena->threads)!=0);
     cleanup_map(&arena->chunk_cached_szad);
     cleanup_map(&arena->chunk_in_use);
     cleanup_map(&arena->chunk_nodes.chunk_in_use);
-}
-
-void destroy_arena(arena_t* arena){
-    while (atomic_load(&arena->threads)!=0);
-    cleanup_arena(arena);
-    std::size_t rsize = NEXT_ALIGN(sizeof(arena_t),CACHELINE);
-    chunk_dalloc((void*)arena,rsize);
 }
 
 int rc_pagenum;
 std::size_t rc_maxsize;
 std::size_t rc_headersize;
 
-// start from 0
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr){
     intptr_t content = chunkaddr + rc_headersize - 1;
     return NEXT_ALIGN(addr-content,PAGE)>>PAGESHIFT;
@@ -243,12 +234,10 @@ void cal_rc_pagenum(std::size_t rcsize){
     slog(LEVELA,"rc_pagenum:%d rc_maxsize:%lu rc_headersize:%lu\n",rc_pagenum,rc_maxsize,rc_headersize);
 }
 
-// start from 1
 span_t* pid_to_spanmeta(intptr_t chunkaddr,int pid){
     return (span_t*)(chunkaddr+(rc_pagenum<<SBITSSHIFT)+(pid-1)*sizeof(span_t));
 }
 
-// start from 1
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid){
     return (sbits*)(chunkaddr+((pid-1)<<SBITSSHIFT));
 }
@@ -299,12 +288,7 @@ void delete_map(arena_t* arena,chunk_node_t* chunk,bool dirty){
     rb_delete(&arena->chunk_cached_ad,&chunk->bnode);
 }
 
-arena_t* new_arena(){
-    std::size_t asize = NEXT_ALIGN(sizeof(arena_t),CACHELINE);
-    std::size_t tsize;
-    intptr_t addr = (intptr_t)chunk_alloc(asize,CHUNKSIZE,&tsize,false);
-    arena_t* arena = (arena_t*)addr;
-    
+void init_arena(arena_t* arena){
     arena->threads = 0;
     smutex_init(&arena->arena_mtx);
     rb_init(&arena->chunk_in_use,bigger_ad,equal_ad);
@@ -316,10 +300,6 @@ arena_t* new_arena(){
     rb_init(&arena->chunk_cached_szad,bigger_szad,equal_szad);
     rb_init(&arena->chunk_dirty_ad,bigger_ad,equal_ad);
     rb_init(&arena->chunk_dirty_szad,bigger_szad,equal_szad);
-
-    chunk_node_t* chunk = alloc_chunk_node(&arena->chunk_nodes);
-    chunk_node_init(chunk,tsize-asize,addr+asize);
-    insert_map(arena,chunk,false);
 
     rb_init(&arena->spanavail,bigger_szad_span,equal_szad_span);
     rb_init(&arena->spandirty,bigger_szad_span,equal_szad_span);
@@ -337,7 +317,6 @@ arena_t* new_arena(){
         init_spanbin(bin,regsize_to_bin[i]);
         rb_init(&bin->spans,bigger_ad_span,equal_ad_span);
     }
-    return arena;
 }
 
 chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
@@ -353,7 +332,7 @@ chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
         chunk = it.next_ptr();
         if (chunk==nullptr)
             break;
-        if (chunk->chunk_size>=size){
+        if (chunk->chunk_size>=size){            
             // iterator is invalid from here
             delete_map(arena,chunk,dirty);
             if (chunk->chunk_size==size){
@@ -438,7 +417,8 @@ void* new_chunk(arena_t* arena,std::size_t size){
     // if break this,then chunks CAN NOT be merged
     size = NEXT_ALIGN(size,CHUNKSIZE);
     chunk_node_t* chunk = arena->chunk_spared;
-    if (chunk!=nullptr && chunk->chunk_size>=size){
+
+    if (chunk!=nullptr && chunk->chunk_size>=size){        
         arena->dirty_size -= size;
         if (chunk->chunk_size==size){
             arena->chunk_spared = nullptr;
@@ -449,7 +429,6 @@ void* new_chunk(arena_t* arena,std::size_t size){
         chunk_node_init(cnode,size,chunk->start_addr);
         chunk->start_addr += size;
         chunk->chunk_size -= size;
-        arena->chunk_spared = chunk;
         rb_insert(&arena->chunk_in_use,&cnode->anode);
         return (void*)cnode->start_addr;
     }
@@ -457,7 +436,7 @@ void* new_chunk(arena_t* arena,std::size_t size){
     chunk = chunk_from_map(arena,size,true);
     if (chunk!=nullptr)
         return (void*)chunk->start_addr;
-        
+    
     chunk = chunk_from_map(arena,size,false);
     if (chunk!=nullptr)
         return (void*)chunk->start_addr;
@@ -474,41 +453,34 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty){
     // if under any circumstances,this function is called with dirty false.
     // then crash...
     rb_delete(&arena->chunk_in_use,&chunk->anode);
-    if (!dirty){
+    if (!dirty)
         chunk_to_map(arena,chunk,dirty);
-        return;
-    }
-    if (arena->chunk_spared==nullptr){
+    else if (arena->chunk_spared==nullptr){
         arena->chunk_spared = chunk;
         arena->dirty_size += chunk->chunk_size;
         // need this. so link this.
         link_chunkdirty_arena(arena,chunk);
-        return;
-    }
-    if (behind_addr(chunk,arena->chunk_spared) && mergable(chunk,arena->chunk_spared)){
+    }else if (behind_addr(chunk,arena->chunk_spared) && mergable(chunk,arena->chunk_spared)){
         arena->chunk_spared->chunk_size += chunk->chunk_size;
         arena->chunk_spared->start_addr = chunk->start_addr;
         arena->dirty_size += chunk->chunk_size;
         dalloc_node(&arena->chunk_nodes,chunk);
-        return;
-    }
-    else if (behind_addr(arena->chunk_spared,chunk) && mergable(arena->chunk_spared,chunk)){
+    }else if (behind_addr(arena->chunk_spared,chunk) && mergable(arena->chunk_spared,chunk)){
         arena->chunk_spared->chunk_size += chunk->chunk_size;
         arena->dirty_size += chunk->chunk_size;
         dalloc_node(&arena->chunk_nodes,chunk);
-        return;
-    }
-    if (behind_addr(chunk,arena->chunk_spared)){
+    }else if (behind_addr(chunk,arena->chunk_spared)){
         chunk_node_t* _chunk_spared = arena->chunk_spared;
         arena->dirty_size -= _chunk_spared->chunk_size;
         // don't need this. so unlink this.
         unlink_chunkdirty_arena(arena,_chunk_spared);
         arena->chunk_spared = chunk;
+        link_chunkdirty_arena(arena,chunk);
         arena->dirty_size += chunk->chunk_size;
         chunk_to_map(arena,_chunk_spared,dirty);
-        return;
-    }
-    chunk_to_map(arena,chunk,dirty);
+    }else
+        chunk_to_map(arena,chunk,dirty);
+    return;
 }
 
 int size_class(std::size_t size){
@@ -679,6 +651,9 @@ span_t* new_span(arena_t* arena,std::size_t size){
         return span;
     
     void* ptr = new_chunk(arena,SPANCSIZE);
+
+    sassert(is_alignof((intptr_t)ptr,CHUNKSIZE),"chunk is not aligned\n");
+    
     span = chunk_to_bigspan(ptr);
     span_t* left = split_bigspan(span,size);
     sbits_large(span->start_pos,span->spansize,N,false,-1);
@@ -696,10 +671,13 @@ span_t* new_span_for_bin(arena_t* arena,int binid){
     
     smutex_lock(&arena->arena_mtx);
     span_t* span = new_span(arena,rsize);
-    smutex_unlock(&arena->arena_mtx);
-    if (span==nullptr)
+    if (span==nullptr){
+        smutex_unlock(&arena->arena_mtx);
         return nullptr;
+    }
     sbits_small_alloc(span->start_pos,rsize,binid);
+    smutex_unlock(&arena->arena_mtx);
+
     init_span(span,rsize,bin->regsize,bin->regnum);
     span_to_bin(span,bin);
     return span;
@@ -727,15 +705,10 @@ void* alloc_reg(span_t* span){
     return (void*)ret;
 }
 
-void* alloc_small(arena_t* arena,std::size_t size){
-    int binid = size_class(size);
-    if (binid>=NBINS)
-        return nullptr;
+void* find_span_and_alloc(arena_t* arena,int binid,span_t** from){
     spanbin_t* bin = &arena->bins[binid];
-    smutex_lock(&bin->mtx);
     if (bin->spannum==0){
         if (new_span_for_bin(arena,binid)==nullptr){
-            smutex_unlock(&bin->mtx);
             return nullptr;
         }       
     }
@@ -762,16 +735,49 @@ void* alloc_small(arena_t* arena,std::size_t size){
     }
     if (span==nullptr){
         span = new_span_for_bin(arena,binid);
-        if (span==nullptr){
-            smutex_unlock(&bin->mtx);
+        if (span==nullptr)
             return nullptr;
-        }
     }
     void* ret = alloc_reg(span);
     if (span_is_full(span))
         --bin->span_not_full;
+    else if (from!=nullptr)
+        *from = span;
+    return ret;
+}
+
+void* alloc_small(arena_t* arena,std::size_t size){
+    int binid = size_class(size);
+    if (binid>=NBINS)
+        return nullptr;
+    spanbin_t* bin = &arena->bins[binid];
+    smutex_lock(&bin->mtx);
+    void* ret = find_span_and_alloc(arena,binid,nullptr);
     smutex_unlock(&bin->mtx);
     return ret;
+}
+
+void alloc_small_batch(arena_t* arena,std::size_t size,void** ptrs,int want){
+    int binid = size_class(size);
+    if (binid>=NBINS)
+        return;
+    spanbin_t* bin = &arena->bins[binid];
+    smutex_lock(&bin->mtx);
+    span_t* from = nullptr;
+    for (int i=0;i<want;++i){
+        void* _ptr;
+        if (from!=nullptr){
+            _ptr = alloc_reg(from);
+            if (_ptr!=nullptr){
+                ptrs[i] = _ptr;
+                continue;
+            }
+            from = nullptr;
+        }
+        _ptr = find_span_and_alloc(arena,binid,&from);
+        ptrs[i] = _ptr;
+    }
+    smutex_unlock(&bin->mtx);
 }
 
 bool mergeable_span(span_t* a,span_t* b){  
@@ -850,14 +856,17 @@ void purge(arena_t* arena,std::size_t size){
         if (cnow!=&arena->lchunkdirty)
             _chunk = node_to_struct(chunk_node_t,lchunk,cnow);
         if (_chunk!=nullptr && now==&_chunk->ldirty){
+            lnode_t* cnow_next = cnow->next;
             chunk_node_t* chunk = node_to_struct(chunk_node_t,ldirty,now);
-            delete_map(arena,chunk,true);
+            if (chunk==arena->chunk_spared)
+                arena->chunk_spared = nullptr;
+            else
+                delete_map(arena,chunk,true);
             fsize += chunk->chunk_size;
             page_to_corner((void*)chunk->start_addr,chunk->chunk_size);
             chunk_to_map(arena,chunk,false);
-            cnow = cnow->next;
-        }
-        else{
+            cnow = cnow_next;
+        }else{
             span_t* span = node_to_struct(span_t,ldirty,now);
             delete_map_span(arena,span,true);
             fsize += span->spansize;
@@ -900,7 +909,7 @@ void dalloc_small(arena_t* arena,void* ptr){
         smutex_unlock(&bin->mtx);
         return;
     }
-    
+
     --bin->spannum;
     --bin->span_not_full;
     if (bin->cur==span)
@@ -932,10 +941,23 @@ void* alloc_large(arena_t* arena,std::size_t size){
     size = regsize_to_bin[binid];
     smutex_lock(&arena->arena_mtx);
     span_t* span = new_span(arena,size);
+    sbits_large(span->start_pos,span->spansize,Y,true,binid);
     smutex_unlock(&arena->arena_mtx);
     lnode_init(&span->ldirty);
-    sbits_large(span->start_pos,span->spansize,Y,true,binid);
     return (void*)span->start_pos;
+}
+
+void alloc_large_batch(arena_t* arena,std::size_t size,void** ptrs,int want){
+    int binid = size_class(size);
+    size = regsize_to_bin[binid];
+    smutex_lock(&arena->arena_mtx);
+    for (int i=0;i<want;++i){
+        span_t* span = new_span(arena,size);
+        lnode_init(&span->ldirty);
+        sbits_large(span->start_pos,span->spansize,Y,true,binid);
+        ptrs[i] = (void*)span->start_pos;
+    }
+    smutex_unlock(&arena->arena_mtx);
 }
 
 void dalloc_large(arena_t* arena,void* ptr){
@@ -961,7 +983,11 @@ void dalloc_huge(arena_t* arena,void* ptr){
     smutex_lock(&arena->arena_mtx);
     delete_chunk(arena,ptr,true);
     std::size_t wanted = should_purge(arena);
-    if (unlikely(wanted>0))
+    if (unlikely(wanted>0)){
+        printf("huge purge called\n");
+
         purge(arena,wanted);
+    }
+        
     smutex_unlock(&arena->arena_mtx);
 }
