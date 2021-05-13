@@ -50,8 +50,9 @@ using rbnode_t = struct rbnode<T>;
 
 template<typename T>
 struct rb_tree{
-
     rbnode_t<T>* root;
+
+    int size;
 
     bool (*_bigger)(const T*,const T*);
 
@@ -637,7 +638,8 @@ inline bool rb_empty(rb_tree_t<T>* tree){
 template<typename T>
 inline void rb_init(rb_tree_t<T>* tree,
             bool (*bigger0)(const T*,const T*),bool (*equal0)(const T*,const T*))
-{
+{   
+    tree->size = 0;
     tree->root = nullptr;
     tree->_bigger = bigger0;
     tree->_equal = equal0;
@@ -653,11 +655,13 @@ inline void rb_insert(rb_tree_t<T>* tree,rbnode_t<T>* node){
     node->rson = nullptr;
 #endif
     tree->root = insert_fast(tree->root,node);
+    ++tree->size;
 }
 
 template<typename T>
 inline void rb_delete(rb_tree_t<T>* tree,rbnode_t<T>* node){
     tree->root = _delete(tree->root,node);
+    --tree->size;
 #ifdef ARENA
     node->father = nullptr;
     node->lson = nullptr;

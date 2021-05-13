@@ -1,6 +1,7 @@
 #include "Tcache.hpp"
 
 atomic_bool arenas_inited = false;
+atomic_int inited_no = 0;
 atomic_int no = -1;
 arena_t arenas[CPUNUM_S];
 
@@ -41,11 +42,11 @@ void* smalloc(std::size_t size){
         pthread_setspecific(pkey,&tc);  
         bool value = false;
         if (atomic_load(&no)==-1){
+            int myturn = -1;
+            while ((myturn=atomic_fetch_add(&inited_no,1))<CPUNUM_S)
+                init_arena(&arenas[myturn]);
             if (atomic_compare_exchange_strong(&arenas_inited,&value,true)){
-                // have to take care of main thread
                 atexit(arenas_cleanup);
-                for (int i=0;i<CPUNUM_S;++i)
-                    init_arena(&arenas[i]);
                 std::size_t _bigchunk_size = 0;
                 for (int i=0;i<NBINS+NLBINS;++i){
                     int ncached = max(CACHESIZE/regsize_to_bin[i],NCACHEDMIN);
@@ -73,17 +74,9 @@ void* smalloc(std::size_t size){
             tbin->size = regsize_to_bin[i];
             tbin->avail = cache_num[i];
             tbin->ptrs = chunk+ptrnum;
-            for (int j=0;j<tbin->ncached;++j){
-                void** now = chunk+ptrnum;
-                void* _ptr = (i<NBINS)?alloc_small(tc.arena,tbin->size):alloc_large(tc.arena,tbin->size);
-                *now = _ptr;
-                ++ptrnum;
-            }
-        #if 0
             (i<NBINS) ? alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,tbin->ncached)
                       : alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,tbin->ncached);
             ptrnum += tbin->ncached;
-        #endif
         }
         tc_inited = true;
 
@@ -93,15 +86,9 @@ void* smalloc(std::size_t size){
         tbin_t* tbin = &tc.bins[binid];
         if (tbin->avail==0){
             int fillnum = tbin->ncached>>1;
-            for (int i=0;i<fillnum;++i){
-                void** now = tbin->ptrs+i;
-                void* _ptr = (binid<NBINS)?alloc_small(tc.arena,tbin->size):alloc_large(tc.arena,tbin->size);
-                *now = _ptr;
-            }
-        #if 0
             (binid<NBINS) ? alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,fillnum)
                           : alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,fillnum);
-        #endif
+        
             tbin->avail += fillnum;
             slog(LEVELB,"fill tbin(%d),fill %d nums\n",binid,fillnum);
         }
