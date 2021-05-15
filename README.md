@@ -7,6 +7,8 @@ Actually,this can also be called tmalloc.But since 't' and 's' mean the same thi
 What can it do ? This is a good question because I don't know that neither.It's up to you.In fact,
 it's still under development (v0.1).So it's no surprise that it only has some basic function now.
 
+For linux on x86
+
 ### steps & objects
 ----
 - [x] some utility functions
