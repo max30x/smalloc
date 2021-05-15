@@ -688,7 +688,7 @@ bool span_is_full(span_t* span){
 void* alloc_reg(span_t* span){
     if (span->nfree>0){
         --span->nfree;
-        lnode_t* ret = span->lfree;
+        slnode_t* ret = span->lfree;
         span->lfree = ret->next;
         return (void*)ret;
     }
@@ -900,8 +900,8 @@ void dalloc_small(arena_t* arena,void* ptr){
 
     smutex_lock(&bin->mtx);
     bool was_full = span_is_full(span);
-    lnode_t* free_prev = span->lfree;
-    span->lfree = (lnode_t*)ptr;
+    slnode_t* free_prev = span->lfree;
+    span->lfree = (slnode_t*)ptr;
     span->lfree->next = free_prev;
     ++span->nfree;
     if (was_full)

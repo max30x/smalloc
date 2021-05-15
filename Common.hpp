@@ -25,6 +25,11 @@
     ret;                \
 })
 
+struct slnode{
+    struct slnode* next;
+};
+using slnode_t = struct slnode;
+
 struct lnode{
     struct lnode* next;
     struct lnode* prev;

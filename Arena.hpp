@@ -61,7 +61,7 @@ struct span{
     int nfree;
 
     // use this to chain free regions together
-    lnode_t* lfree;
+    slnode_t* lfree;
     
     // link with other dirty spans
     lnode_t ldirty;
