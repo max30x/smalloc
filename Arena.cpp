@@ -93,7 +93,6 @@ void chunk_node_init(chunk_node_t* node,std::size_t size,intptr_t addr){
 }
 
 bool alloc_chunk_for_node(mnode_t<chunk_node_t>* cnodes){
-    //std::size_t node_size = NEXT_ALIGN(sizeof(chunk_node_t),CACHELINE);
     std::size_t node_size = sizeof(chunk_node_t);
     cnodes->nsize = node_size;
     cnodes->offset = node_size;
@@ -450,15 +449,15 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty){
     chunk_node_t snode;
     chunk_node_init(&snode,0,(intptr_t)addr);
     chunk_node_t* chunk = search_cnode(&arena->chunk_in_use,&snode.anode);
-    // if under any circumstances,this function is called with dirty false.
-    // then crash...
+    // if,under any circumstances,this function is called with dirty false,then crash.
+    // still wondering if this would happen...
     rb_delete(&arena->chunk_in_use,&chunk->anode);
     if (!dirty)
         chunk_to_map(arena,chunk,dirty);
     else if (arena->chunk_spared==nullptr){
         arena->chunk_spared = chunk;
         arena->dirty_size += chunk->chunk_size;
-        // need this. so link this.
+        // ALWAYS have to take special care of chunk_spared
         link_chunkdirty_arena(arena,chunk);
     }else if (behind_addr(chunk,arena->chunk_spared) && mergable(chunk,arena->chunk_spared)){
         arena->chunk_spared->chunk_size += chunk->chunk_size;
@@ -472,7 +471,6 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty){
     }else if (behind_addr(chunk,arena->chunk_spared)){
         chunk_node_t* _chunk_spared = arena->chunk_spared;
         arena->dirty_size -= _chunk_spared->chunk_size;
-        // don't need this. so unlink this.
         unlink_chunkdirty_arena(arena,_chunk_spared);
         arena->chunk_spared = chunk;
         link_chunkdirty_arena(arena,chunk);
@@ -531,7 +529,6 @@ void sbits_large(intptr_t start_pos,std::size_t size,int alloc,bool dirty,int bi
     intptr_t chunkaddr = addr_to_chunk(start_pos);
     int pid_head = addr_to_pid(chunkaddr,start_pos);
     int pid_tail = addr_to_pid(chunkaddr,start_pos+size-1);
-    // make a big span means initialize the metadata of its head page and tail page
     sbits* bs_head = pid_to_sbits(chunkaddr,pid_head);
     SETALLOC(bs_head,alloc);
     SETPAGEID(bs_head,1);
@@ -807,7 +804,6 @@ void span_is_free(arena_t* arena,span_t* span,bool dirty){
             int pageid = PAGEID(sb);
             prev_pid -= (pageid-1);
             span_t* prev = pid_to_spanmeta(chunkaddr,prev_pid);
-            // todo:CAN NOT just simply change dirty size in method below
             delete_map_span(arena,prev,dirty);
             prev->spansize += span->spansize;
             span = prev;
@@ -856,6 +852,8 @@ void purge(arena_t* arena,std::size_t size){
             lnode_t* cnow_next = cnow->next;
             chunk_node_t* chunk = node_to_struct(chunk_node_t,ldirty,now);
             if (chunk!=arena->chunk_spared){
+                // must unlink this in this way
+                // or else the deleted chunk(prev) will be linked again
                 rb_delete(&arena->chunk_dirty_szad,&chunk->anode);
                 rb_delete(&arena->chunk_dirty_ad,&chunk->bnode);
                 arena->dirty_size -= chunk->chunk_size;
@@ -880,6 +878,7 @@ void purge(arena_t* arena,std::size_t size){
         lnode_init(&arena->ldirty);
         return;
     }
+    // DO NOT forget this is a doubly linked list
     if (cnow!=&arena->lchunkdirty){
         arena->lchunkdirty.next = cnow;
         cnow->prev = &arena->lchunkdirty;
@@ -964,7 +963,7 @@ void alloc_large_batch(arena_t* arena,std::size_t size,void** ptrs,int want){
 
 void dalloc_large(arena_t* arena,void* ptr){
     intptr_t chunkaddr = addr_to_chunk((intptr_t)ptr);
-    int pid = addr_to_pid(chunkaddr,(intptr_t)ptr); // 353
+    int pid = addr_to_pid(chunkaddr,(intptr_t)ptr);
     span_t* span = pid_to_spanmeta(chunkaddr,pid);
     smutex_lock(&arena->arena_mtx);
     span_is_free(arena,span,true);

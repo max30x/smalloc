@@ -13,11 +13,17 @@
 
 #define FORCE_INLINE __attribute__((always_inline))
 
-#define min(a,b) \
-    (a<b) ? a : b
+#define min(a,b) ({     \
+    typeof((a)) ret;      \
+    ret = ((a)<(b))?(a):(b);    \
+    ret;                \
+})
 
-#define max(a,b) \
-    (a>b) ? a : b
+#define max(a,b) ({     \
+    typeof((a)) ret;      \
+    ret = ((a)>(b))?(a):(b);    \
+    ret;                \
+})
 
 struct lnode{
     struct lnode* next;
@@ -67,14 +73,14 @@ do{                                     \
 #define LEVELC 3
 
 #define IOSTREAM stdout
-#define SINFO_LEVEL LEVELA
+#define SINFO_LEVEL LEVELB
 #ifdef SINFO
-    #define slog(level,s,...) \
-    do{ \
-    if (SINFO_LEVEL>=level){ \
-        fprintf(IOSTREAM,"line:%d thread:%ld ",__LINE__,pthread_self()); \
-        fprintf(IOSTREAM,s,##__VA_ARGS__); \
-    } \
+    #define slog(level,s,...)                                               \
+    do{                                                                     \
+    if (SINFO_LEVEL>=level){                                                \
+        fprintf(IOSTREAM,"line:%d thread:%ld ",__LINE__,pthread_self());    \
+        fprintf(IOSTREAM,s,##__VA_ARGS__);                                  \
+    }                                                                       \
     }while(0)
 #else
     #define slog(s,...) \

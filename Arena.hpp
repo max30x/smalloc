@@ -62,10 +62,10 @@ struct span{
 
     // use this to chain free regions together
     lnode_t* lfree;
-
+    
     // link with other dirty spans
     lnode_t ldirty;
-
+    
     intptr_t next_free;
     
     rbnode_t<struct span> anode;
@@ -83,37 +83,37 @@ using span_t = struct span;
     (sbits*)(addr+sizeof(sbits)*(pid-1))
 
 // for x86
-#define ff1_long(num) ({ \
-unsigned long ret; \
-__asm__ ("bsr %1,%0\n\t" \
-        :"+r"(ret) \
-        :"r"(num)); \
-ret; \
+#define ff1_long(num) ({    \
+unsigned long ret;          \
+__asm__ ("bsr %1,%0\n\t"    \
+        :"+r"(ret)          \
+        :"r"(num));         \
+ret;                        \
 })
 
 #define SETPAGEID(bits,pid) do{ \
-    *(bits) &= ~((1<<10)-1); \
-    *(bits) |= pid; \
+    *(bits) &= ~((1<<10)-1);    \
+    *(bits) |= pid;             \
 }while(0)
 
-#define SETBINID(bits,bid) do{ \
-    *(bits) &= ~(((1<<8)-1)<<10); \
-    *(bits) |= bid<<10; \
+#define SETBINID(bits,bid) do{      \
+    *(bits) &= ~(((1<<8)-1)<<10);   \
+    *(bits) |= bid<<10;             \
 }while(0)
 
-#define SETALLOC(bits,state) do{ \
-    *(bits) &= ~(1<<18); \
-    *(bits) |= state<<18; \
+#define SETALLOC(bits,state) do{    \
+    *(bits) &= ~(1<<18);            \
+    *(bits) |= state<<18;           \
 }while(0)
 
-#define SETTYPE(bits,type) do{ \
-    *(bits) &= ~(((1<<2)-1)<<19); \
-    *(bits) |= type<<19; \
+#define SETTYPE(bits,type) do{      \
+    *(bits) &= ~(((1<<2)-1)<<19);   \
+    *(bits) |= type<<19;            \
 }while(0)
 
-#define SETDIRTY(bits,state) do{ \
-    *(bits) &= ~(1<<21); \
-    *(bits) |= state<<21; \
+#define SETDIRTY(bits,state) do{    \
+    *(bits) &= ~(1<<21);            \
+    *(bits) |= state<<21;           \
 }while (0)
     
 
