@@ -218,6 +218,17 @@ void init_spanbin(spanbin_t* bin,std::size_t regsize){
     slog(LEVELA,"regnum:%d regsize:%lu spansize:%lu\n",regnum,regsize,bin->spansize);
 }
 
+void init_spanlists(span_list_t* slist,int sizeclass){
+    smutex_init(&slist->mtx);
+    slnode_init(&slist->spans);
+    slist->avail = 0;
+    int size = regsize_to_bin[sizeclass];
+    int max_cached = 64*1024;
+    int min_cached_num = 4;
+    slist->max_avail = max(max_cached/size,min_cached_num);
+    slog(LEVELA,"spanlist[%d] - max_avail:%d\n",sizeclass,slist->max_avail);
+}
+
 void cal_rc_pagenum(std::size_t rcsize){
     std::size_t a = 0, b = rcsize;
     rc_pagenum = 0;
@@ -316,6 +327,9 @@ void init_arena(arena_t* arena){
         init_spanbin(bin,regsize_to_bin[i]);
         rb_init(&bin->spans,bigger_ad_span,equal_ad_span);
     }
+
+    for (int i=0;i<NBINS+NLBINS;++i)
+        init_spanlists(&arena->spanlists[i],i);
 }
 
 chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
@@ -663,6 +677,18 @@ span_t* new_span_for_bin(arena_t* arena,int binid){
     spanbin_t* bin = &arena->bins[binid];
     std::size_t rsize = bin->spansize;
     
+    span_list_t* spanlist = &arena->spanlists[binid];
+    smutex_lock(&spanlist->mtx);
+    if (spanlist->avail!=0){
+        span_t* span = node_to_struct(span_t,lspans,spanlist->spans.next);
+        spanlist->spans.next = span->lspans.next;
+        span->lspans.next = nullptr;
+        --spanlist->avail;
+        smutex_unlock(&spanlist->mtx);
+        return span;
+    }
+    smutex_unlock(&spanlist->mtx);
+
     smutex_lock(&arena->arena_mtx);
     span_t* span = new_span(arena,rsize);
     if (span==nullptr){
@@ -888,6 +914,22 @@ void purge(arena_t* arena,std::size_t size){
     now->prev = &arena->ldirty;
 }
 
+bool try_link_spanlist(arena_t* arena,span_t* span){
+    int sc = size_class(span->spansize);
+    span_list_t* spanlist = &arena->spanlists[sc];
+    smutex_lock(&spanlist->mtx);
+    if (spanlist->avail==spanlist->max_avail){
+        smutex_unlock(&spanlist->mtx);
+        return false;
+    }
+    slnode_init(&span->lspans);
+    span->lspans.next = spanlist->spans.next;
+    spanlist->spans.next = &span->lspans;
+    ++spanlist->avail;
+    smutex_unlock(&spanlist->mtx);
+    return true;
+}
+
 void dalloc_small(arena_t* arena,void* ptr){
     intptr_t chunkaddr = addr_to_chunk((intptr_t)ptr);
     int pid = addr_to_pid(chunkaddr,(intptr_t)ptr);
@@ -929,6 +971,9 @@ void dalloc_small(arena_t* arena,void* ptr){
     }
     smutex_unlock(&bin->mtx);
 
+    if (try_link_spanlist(arena,span))
+        return;
+
     smutex_lock(&arena->arena_mtx);
     span_is_free(arena,span,true);
     std::size_t wanted = should_purge(arena);
@@ -965,6 +1010,10 @@ void dalloc_large(arena_t* arena,void* ptr){
     intptr_t chunkaddr = addr_to_chunk((intptr_t)ptr);
     int pid = addr_to_pid(chunkaddr,(intptr_t)ptr);
     span_t* span = pid_to_spanmeta(chunkaddr,pid);
+
+    if (try_link_spanlist(arena,span))
+        return;
+
     smutex_lock(&arena->arena_mtx);
     span_is_free(arena,span,true);
     std::size_t wanted = should_purge(arena);

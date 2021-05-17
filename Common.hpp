@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <pthread.h>
 
-//#define SINFO
+#define SINFO
 
 #define NEXT_ALIGN(num,align) \
     ((num+align-1) & (~(align-1)))
@@ -29,6 +29,10 @@ struct slnode{
     struct slnode* next;
 };
 using slnode_t = struct slnode;
+
+inline void slnode_init(slnode_t* n){
+    n->next = nullptr;
+}
 
 struct lnode{
     struct lnode* next;

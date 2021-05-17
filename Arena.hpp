@@ -63,9 +63,14 @@ struct span{
     // use this to chain free regions together
     slnode_t* lfree;
     
-    // link with other dirty spans
-    lnode_t ldirty;
     
+    union{
+        // link with other dirty spans
+        lnode_t ldirty;
+        // link with other spans in spanlist
+        slnode_t lspans;
+    };
+
     intptr_t next_free;
     
     rbnode_t<struct span> anode;
@@ -170,6 +175,14 @@ static int regsize_to_bin[NBINS+NLBINS] = {
     1280*1024,1536*1024,1792*1024
 };
 
+struct span_list{
+    int max_avail;
+    int avail;
+    slnode_t spans;
+    smutex_t mtx;
+};
+using span_list_t = struct span_list;
+
 #define DIRTYMAX(all) (all) >> 3
 
 struct arena{
@@ -200,6 +213,8 @@ struct arena{
     std::size_t all_size;
 
     spanbin_t bins[NBINS];
+
+    span_list_t spanlists[NBINS+NLBINS];
 };
 
 using arena_t = struct arena;
