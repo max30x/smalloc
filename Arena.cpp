@@ -339,7 +339,7 @@ chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
         tree = &arena->chunk_dirty_szad;
     else
         tree = &arena->chunk_cached_szad;
-    
+        
     rb_iter_t<chunk_node_t> it(tree);
     while (true){
         chunk = it.next_ptr();
@@ -464,7 +464,6 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty){
     chunk_node_init(&snode,0,(intptr_t)addr);
     chunk_node_t* chunk = search_cnode(&arena->chunk_in_use,&snode.anode);
     // if,under any circumstances,this function is called with dirty false,then crash.
-    // still wondering if this would happen...
     rb_delete(&arena->chunk_in_use,&chunk->anode);
     if (!dirty)
         chunk_to_map(arena,chunk,dirty);
@@ -673,24 +672,31 @@ span_t* new_span(arena_t* arena,std::size_t size){
     return span;
 }
 
+span_t* try_unlink_spanlist(arena_t* arena,int binid){
+    span_list_t* spanlist = &arena->spanlists[binid];
+    smutex_lock(&spanlist->mtx);
+    if (spanlist->avail==0){
+        smutex_unlock(&spanlist->mtx);
+        return nullptr;
+    }
+    span_t* span = node_to_struct(span_t,lspans,spanlist->spans.next);
+    spanlist->spans.next = span->lspans.next;
+    span->lspans.next = nullptr;
+    --spanlist->avail;
+    smutex_unlock(&spanlist->mtx);
+    return span;
+}
+
 span_t* new_span_for_bin(arena_t* arena,int binid){
     spanbin_t* bin = &arena->bins[binid];
     std::size_t rsize = bin->spansize;
     
-    span_list_t* spanlist = &arena->spanlists[binid];
-    smutex_lock(&spanlist->mtx);
-    if (spanlist->avail!=0){
-        span_t* span = node_to_struct(span_t,lspans,spanlist->spans.next);
-        spanlist->spans.next = span->lspans.next;
-        span->lspans.next = nullptr;
-        --spanlist->avail;
-        smutex_unlock(&spanlist->mtx);
+    span_t* span = try_unlink_spanlist(arena,binid);
+    if (span!=nullptr)
         return span;
-    }
-    smutex_unlock(&spanlist->mtx);
 
     smutex_lock(&arena->arena_mtx);
-    span_t* span = new_span(arena,rsize);
+    span = new_span(arena,rsize);
     if (span==nullptr){
         smutex_unlock(&arena->arena_mtx);
         return nullptr;
@@ -970,7 +976,6 @@ void dalloc_small(arena_t* arena,void* ptr){
         }
     }
     smutex_unlock(&bin->mtx);
-
     if (try_link_spanlist(arena,span))
         return;
 
@@ -985,8 +990,13 @@ void dalloc_small(arena_t* arena,void* ptr){
 void* alloc_large(arena_t* arena,std::size_t size){
     int binid = size_class(size);
     size = regsize_to_bin[binid];
+    
+    span_t* span = try_unlink_spanlist(arena,binid);
+    if (span!=nullptr)
+        return (void*)span->start_pos;
+    
     smutex_lock(&arena->arena_mtx);
-    span_t* span = new_span(arena,size);
+    span = new_span(arena,size);
     sbits_large(span->start_pos,span->spansize,Y,true,binid);
     smutex_unlock(&arena->arena_mtx);
     lnode_init(&span->ldirty);
@@ -1010,7 +1020,6 @@ void dalloc_large(arena_t* arena,void* ptr){
     intptr_t chunkaddr = addr_to_chunk((intptr_t)ptr);
     int pid = addr_to_pid(chunkaddr,(intptr_t)ptr);
     span_t* span = pid_to_spanmeta(chunkaddr,pid);
-
     if (try_link_spanlist(arena,span))
         return;
 

@@ -63,10 +63,10 @@ struct span{
     // use this to chain free regions together
     slnode_t* lfree;
     
-    
     union{
         // link with other dirty spans
         lnode_t ldirty;
+
         // link with other spans in spanlist
         slnode_t lspans;
     };
