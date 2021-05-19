@@ -928,6 +928,9 @@ bool try_link_spanlist(arena_t* arena,span_t* span){
         smutex_unlock(&spanlist->mtx);
         return false;
     }
+    span->nfree = 0;
+    span->lfree = nullptr;
+    span->next_free = span->start_pos; 
     slnode_init(&span->lspans);
     span->lspans.next = spanlist->spans.next;
     spanlist->spans.next = &span->lspans;

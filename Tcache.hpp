@@ -10,6 +10,7 @@
 #define NCACHEDMIN 16
 
 struct tbin{
+    int ratio;
     int avail;
     int ncached;
     std::size_t size;

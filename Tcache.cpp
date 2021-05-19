@@ -71,17 +71,14 @@ void* smalloc(std::size_t size){
         int ptrnum = 0;
         for (int i=0;i<NBINS+NLBINS;++i){
             tbin_t* tbin = &tc.bins[i];
+            tbin->ratio = 2;
             tbin->ncached = cache_num[i];
             tbin->size = regsize_to_bin[i];
             tbin->ptrs = chunk+ptrnum;
-            if (i>=NBINS){
-                int alloc_num = max(tbin->ncached>>2,1<<2);
-                tbin->avail = alloc_num;
-                alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num);
-            }else{
-                tbin->avail = cache_num[i];
-                alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,tbin->avail);
-            }
+            int alloc_num = max(tbin->ncached>>tbin->ratio,1);
+            (i>=NBINS) ? alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num)
+                       : alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num);
+            tbin->avail = alloc_num;
             ptrnum += tbin->ncached;
         }
         tc_inited = true;
@@ -90,7 +87,8 @@ void* smalloc(std::size_t size){
     if (binid!=-1){
         tbin_t* tbin = &tc.bins[binid];
         if (tbin->avail==0){
-            int fillnum = tbin->ncached>>1;
+            int _ratio = (tbin->ratio!=0) ? --tbin->ratio : 0;
+            int fillnum = tbin->ncached >> _ratio;
             (binid<NBINS) ? alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,fillnum)
                           : alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,fillnum);
             tbin->avail += fillnum;
