@@ -8,6 +8,7 @@
 
 #define CACHESIZE 64*1024
 #define NCACHEDMIN 16
+#define INITRATIO 3
 
 struct tbin{
     int ratio;

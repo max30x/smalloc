@@ -50,7 +50,7 @@ void* smalloc(std::size_t size){
                 atexit(arenas_cleanup);
                 std::size_t _bigchunk_size = 0;
                 for (int i=0;i<NBINS+NLBINS;++i){
-                    int ncached = max(CACHESIZE/regsize_to_bin[i],NCACHEDMIN);
+                    int ncached = smax(CACHESIZE/regsize_to_bin[i],NCACHEDMIN);
                     cache_num[i] = ncached;
                     slog(LEVELA,"cache_num[%d]:%d\n",i,ncached);
                     _bigchunk_size += PTRSIZE*ncached;
@@ -71,11 +71,11 @@ void* smalloc(std::size_t size){
         int ptrnum = 0;
         for (int i=0;i<NBINS+NLBINS;++i){
             tbin_t* tbin = &tc.bins[i];
-            tbin->ratio = 2;
+            tbin->ratio = INITRATIO;
             tbin->ncached = cache_num[i];
             tbin->size = regsize_to_bin[i];
             tbin->ptrs = chunk+ptrnum;
-            int alloc_num = max(tbin->ncached>>tbin->ratio,1);
+            int alloc_num = smax(tbin->ncached>>tbin->ratio,1);
             (i>=NBINS) ? alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num)
                        : alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num);
             tbin->avail = alloc_num;

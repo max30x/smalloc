@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#define SINFO
+//#define SINFO
 
 #define NEXT_ALIGN(num,align) \
     ((num+align-1) & (~(align-1)))
@@ -13,16 +13,16 @@
 
 #define FORCE_INLINE __attribute__((always_inline))
 
-#define min(a,b) ({     \
-    typeof((a)) ret;      \
+#define smin(a,b) ({            \
+    typeof((a)) ret;            \
     ret = ((a)<(b))?(a):(b);    \
-    ret;                \
+    ret;                        \
 })
 
-#define max(a,b) ({     \
-    typeof((a)) ret;      \
+#define smax(a,b) ({            \
+    typeof((a)) ret;            \
     ret = ((a)>(b))?(a):(b);    \
-    ret;                \
+    ret;                        \
 })
 
 struct slnode{
@@ -68,7 +68,7 @@ static inline void unlink_lnode(lnode_t* b){
     b->prev = b;
 }
 
-#define sassert(x,s,...)                \
+#define s_assert(x,s,...)               \
 do{                                     \
     if (!(x)){                          \
         printf("line:%d ",__LINE__);    \

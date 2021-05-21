@@ -209,7 +209,7 @@ void init_spanbin(spanbin_t* bin,std::size_t regsize){
     // todo : tune this
     int span_minsize = 16*1024;
     int _regnum = span_minsize/regsize;
-    int regnum = max(REGMAX,_regnum);
+    int regnum = smax(REGMAX,_regnum);
     while (regnum*regsize>rc_maxsize)
         --regnum;
     bin->regnum = regnum;
@@ -225,7 +225,7 @@ void init_spanlists(span_list_t* slist,int sizeclass){
     int size = regsize_to_bin[sizeclass];
     int max_cached = 64*1024;
     int min_cached_num = 4;
-    slist->max_avail = max(max_cached/size,min_cached_num);
+    slist->max_avail = smax(max_cached/size,min_cached_num);
     slog(LEVELA,"spanlist[%d] - max_avail:%d\n",sizeclass,slist->max_avail);
 }
 
