@@ -187,6 +187,7 @@ void cleanup_map(rb_tree_t<chunk_node_t>* tree){
 
 void clear_arena(arena_t* arena){
     while (atomic_load(&arena->threads)!=0);
+    cleanup_map(&arena->chunk_dirty_szad);
     cleanup_map(&arena->chunk_cached_szad);
     cleanup_map(&arena->chunk_in_use);
     cleanup_map(&arena->chunk_nodes.chunk_in_use);
