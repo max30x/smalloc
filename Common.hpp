@@ -73,6 +73,7 @@ do{                                     \
     if (!(x)){                          \
         printf("line:%d ",__LINE__);    \
         printf(s,##__VA_ARGS__);        \
+        abort();                        \
     }                                   \
 }while(0)
 
