@@ -38,7 +38,7 @@ void arenas_cleanup(){
 }
 
 void* smalloc(std::size_t size){
-    if (!tc_inited){
+    if (unlikely(!tc_inited)){
         pthread_key_create(&pkey,thread_cleanup);
         pthread_setspecific(pkey,&tc);  
         bool value = false;
@@ -84,7 +84,7 @@ void* smalloc(std::size_t size){
         tc_inited = true;
     }
     int binid = size_class(size);
-    if (binid!=-1){
+    if (likely(binid!=-1)){
         tbin_t* tbin = &tc.bins[binid];
         if (tbin->avail==0){
             int _ratio = (tbin->ratio!=0) ? --tbin->ratio : 0;
@@ -102,6 +102,8 @@ void* smalloc(std::size_t size){
 }
 
 void sfree(void* ptr){
+    if (unlikely(ptr==nullptr))
+        return;
     intptr_t _ptr = (intptr_t)ptr;
     if ((_ptr&(CHUNKSIZE-1))==0){
         // todo:need a better way to tell if this is a huge chunk
@@ -111,10 +113,10 @@ void sfree(void* ptr){
     intptr_t chunkaddr = addr_to_chunk(_ptr);
     int pid = addr_to_pid(chunkaddr,_ptr);
     sbits* bs = pid_to_sbits(chunkaddr,pid);
-    int type = TYPE(bs);
     int binid = BINID(bs);
     tbin_t* tbin = &tc.bins[binid];
-    if (tbin->avail==tbin->ncached){
+    if (unlikely(tbin->avail==tbin->ncached)){
+        int type = TYPE(bs);
         int thrownum = (tbin->avail<(1<<2)) ? tbin->avail : tbin->avail>>2;
         for (int i=0;i<thrownum;++i){
             void* nowptr = tbin->ptrs[tbin->avail-1];
