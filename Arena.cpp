@@ -628,10 +628,10 @@ span_t* split_bigspan(span_t* span,std::size_t size){
 }
 
 span_t* fsearch_span(rb_tree_t<span_t>* tree,span_t* key){
-	rbnode_t<span_t>* node = rb_fsearch(tree,&key->anode);
-	if (node==nullptr)
-		return nullptr;
-	return (span_t*)node->ptr;
+    rbnode_t<span_t>* node = rb_fsearch(tree,&key->anode);
+    if (node==nullptr)
+        return nullptr;
+    return (span_t*)node->ptr;
 }
 
 span_t* span_from_map(arena_t* arena,std::size_t size,bool dirty){
