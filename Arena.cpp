@@ -641,13 +641,13 @@ span_t* span_from_map(arena_t* arena,std::size_t size,bool dirty){
     else
         tree = &arena->spanavail;
     
-	span_t kspan;
-	init_span(&kspan,size,-1,-1);
-	kspan.start_pos = -1;
-	span_t* _span = fsearch_span(tree,&kspan);
-	if (_span==nullptr)
-		return nullptr; 
-	delete_map_span(arena,_span,dirty);
+    span_t kspan;
+    init_span(&kspan,size,-1,-1);
+    kspan.start_pos = -1;
+    span_t* _span = fsearch_span(tree,&kspan);
+    if (_span==nullptr)
+        return nullptr; 
+    delete_map_span(arena,_span,dirty);
     if (_span->spansize==size)
         return _span;
     span_t* left = split_bigspan(_span,size);
