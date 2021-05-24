@@ -40,7 +40,14 @@ chunk_node_t* search_cnode(rb_tree_t<chunk_node_t>* tree,rbnode_t<chunk_node_t>*
     rbnode_t<chunk_node_t>* result = rb_search(tree,node);
     if (result==nullptr)
         return nullptr;
-    return result->ptr;
+    return (chunk_node_t*)result->ptr;
+}
+
+chunk_node_t* fsearch_cnode(rb_tree_t<chunk_node_t>* tree,chunk_node_t* kchunk){
+    rbnode_t<chunk_node_t>* result = rb_fsearch(tree,&kchunk->anode);
+    if (result==nullptr)
+        return nullptr;
+    return (chunk_node_t*)result->ptr;
 }
 
 void remove_cnode(rb_tree_t<chunk_node_t>* tree,rbnode_t<chunk_node_t>* node){
@@ -334,36 +341,30 @@ void init_arena(arena_t* arena){
 }
 
 chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
-    chunk_node_t* chunk = nullptr;
     rb_tree_t<chunk_node_t>* tree;
     if (dirty)
         tree = &arena->chunk_dirty_szad;
     else
         tree = &arena->chunk_cached_szad;
-        
-    rb_iter_t<chunk_node_t> it(tree);
-    while (true){
-        chunk = it.next_ptr();
-        if (chunk==nullptr)
-            break;
-        if (chunk->chunk_size>=size){            
-            // iterator is invalid from here
-            delete_map(arena,chunk,dirty);
-            if (chunk->chunk_size==size){
-                rb_insert(&arena->chunk_in_use,&chunk->anode);
-                return chunk;
-            }
-            chunk_node_t* cnode = alloc_chunk_node(&arena->chunk_nodes);
-            chunk_node_init(cnode,size,chunk->start_addr);
-            rb_insert(&arena->chunk_in_use,&cnode->anode);
-
-            chunk->start_addr += size;
-            chunk->chunk_size -= size;
-            insert_map(arena,chunk,dirty);
-            return cnode;
-        }
+    
+    chunk_node_t kchunk;
+    chunk_node_init(&kchunk,size,-1);
+    chunk_node_t* _chunk = fsearch_cnode(tree,&kchunk);
+    if (_chunk==nullptr)
+    	return nullptr;
+    delete_map(arena,_chunk,dirty);
+    if (_chunk->chunk_size==size){
+        rb_insert(&arena->chunk_in_use,&_chunk->anode);
+        return _chunk;
     }
-    return nullptr;
+    chunk_node_t* cnode = alloc_chunk_node(&arena->chunk_nodes);
+	chunk_node_init(cnode,size,_chunk->start_addr);
+    rb_insert(&arena->chunk_in_use,&cnode->anode);
+
+	_chunk->start_addr += size;
+    _chunk->chunk_size -= size;
+    insert_map(arena,_chunk,dirty);
+    return cnode;
 }
 
 bool behind_addr(chunk_node_t* c1,chunk_node_t* c2){
@@ -626,30 +627,34 @@ span_t* split_bigspan(span_t* span,std::size_t size){
     return _span;
 }
 
+span_t* fsearch_span(rb_tree_t<span_t>* tree,span_t* key){
+	rbnode_t<span_t>* node = rb_fsearch(tree,&key->anode);
+	if (node==nullptr)
+		return nullptr;
+	return (span_t*)node->ptr;
+}
+
 span_t* span_from_map(arena_t* arena,std::size_t size,bool dirty){
     rb_tree_t<span_t>* tree;
     if (dirty)
         tree = &arena->spandirty;
     else
         tree = &arena->spanavail;
-    rb_iter_t<span_t> it(tree);
-    while (true){
-        span_t* span = it.next_ptr();
-        if (span==nullptr)
-            break;
-        if (span->spansize<size)
-            continue;
-        // iterator is invaild
-        delete_map_span(arena,span,dirty);
-        if (span->spansize==size)
-            return span;
-        span_t* left = split_bigspan(span,size);
-        sbits_large(left->start_pos,left->spansize,N,dirty,-1);
-        rbnode_init(&left->anode,left,true);
-        insert_map_span(arena,left,dirty);
-        return span;
-    }
-    return nullptr;
+    
+	span_t kspan;
+	init_span(&kspan,size,-1,-1);
+	kspan.start_pos = -1;
+	span_t* _span = fsearch_span(tree,&kspan);
+	if (_span==nullptr)
+		return nullptr; 
+	delete_map_span(arena,_span,dirty);
+    if (_span->spansize==size)
+        return _span;
+    span_t* left = split_bigspan(_span,size);
+    sbits_large(left->start_pos,left->spansize,N,dirty,-1);
+    rbnode_init(&left->anode,left,true);
+    insert_map_span(arena,left,dirty);
+    return _span;
 }
 
 span_t* new_span(arena_t* arena,std::size_t size){
@@ -967,18 +972,8 @@ void dalloc_small(arena_t* arena,void* ptr){
     --bin->span_not_full;
     if (bin->cur==span)
         bin->cur = nullptr;
-    else{
-        rb_iter_t<span_t> it(&bin->spans);
-        while (true){
-            span_t* s = it.next_ptr();
-            if (s==nullptr)
-                break;
-            if (span==s){
-                rb_delete(&bin->spans,&s->anode);
-                break;
-            }
-        }
-    }
+    else
+    	rb_delete(&bin->spans,&span->anode);
     smutex_unlock(&bin->mtx);
     if (try_link_spanlist(arena,span))
         return;

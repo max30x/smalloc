@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #define ARENA
 //#define TEST
 
@@ -51,7 +53,7 @@ using rbnode_t = struct rbnode<T>;
 template<typename T>
 struct rb_tree{
     rbnode_t<T>* root;
-
+	
     int size;
 
     bool (*_bigger)(const T*,const T*);
@@ -76,6 +78,7 @@ struct rb_iter{
             prev = nullptr;
             return;
         }
+        //now = tree->leftmost;
         now = tree->root;
         while (now->lson!=nullptr)
             now = now->lson;
@@ -140,17 +143,6 @@ struct rb_iter{
 template<typename T>
 using rb_iter_t = struct rb_iter<T>;
 
-
-template<typename T>
-inline void rbnode_init(rbnode_t<T>* node,T* ptr,bool is_red){
-    node->tree = nullptr;
-    node->father = nullptr;
-    node->lson = nullptr;
-    node->rson = nullptr;
-    node->is_red = is_red;
-    node->ptr = ptr;
-}   
-
 template<typename T>
 inline bool bigger(rbnode_t<T>* a,rbnode_t<T>* b){
     struct rb_tree<T>* tr = (a->tree==nullptr)?b->tree:a->tree;
@@ -161,6 +153,16 @@ template<typename T>
 inline bool equal(rbnode_t<T>* a,rbnode_t<T>* b){
     struct rb_tree<T>* tr = (a->tree==nullptr)?b->tree:a->tree;
     return tr->_equal(a->ptr,b->ptr);
+}
+
+template<typename T>
+inline void rbnode_init(rbnode_t<T>* node,T* ptr,bool is_red){
+    node->tree = nullptr;
+    node->father = nullptr;
+    node->lson = nullptr;
+    node->rson = nullptr;
+    node->is_red = is_red;
+    node->ptr = ptr;
 }
 
 template<typename T>
@@ -367,8 +369,9 @@ inline rbnode_t<T>* rebalance_fast(rbnode_t<T>* root,rbnode_t<T>* node){
 }
 
 template<typename T>
-inline rbnode_t<T>* insert_fast(rbnode_t<T>* root,rbnode_t<T>* node){
-    if (root==nullptr){
+inline rbnode_t<T>* insert_fast(rb_tree_t<T>* tree,rbnode_t<T>* node){
+	rbnode_t<T>* root = tree->root;
+	if (root==nullptr){
         node->is_red = false;
         root = node;
         return root;
@@ -405,6 +408,24 @@ inline rbnode_t<T>* search(rbnode_t<T>* root,rbnode_t<T>* node){
             root = root->rson;
     }
     return root;
+}
+
+template<typename T>
+inline rbnode_t<T>* search_maybe_bigger(rbnode_t<T>* root,rbnode_t<T>* node){
+	rbnode_t<T>* ret = nullptr;
+	while (root!=nullptr){
+        if (equal(root,node)){
+        	ret = root;
+        	break;
+        }
+        else if (bigger(root,node)){
+        	ret = root;
+        	root = root->lson;
+        }
+        else
+            root = root->rson;
+    }
+    return ret;
 }
 
 template<typename T>
@@ -654,7 +675,7 @@ inline void rb_insert(rb_tree_t<T>* tree,rbnode_t<T>* node){
     node->lson = nullptr;
     node->rson = nullptr;
 #endif
-    tree->root = insert_fast(tree->root,node);
+    tree->root = insert_fast(tree,node);
     ++tree->size;
 }
 
@@ -676,8 +697,6 @@ inline rbnode_t<T>* rb_search(rb_tree_t<T>* tree,rbnode_t<T>* node){
 }
 
 template<typename T>
-inline T* rb_begin(rb_tree_t<T>* tree){
-    rb_iter_t<T> it(tree);
-    return it.next_ptr();
+inline rbnode_t<T>* rb_fsearch(rb_tree_t<T>* tree,rbnode_t<T>* node){
+	return search_maybe_bigger(tree->root,node);
 }
-

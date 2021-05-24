@@ -5,7 +5,7 @@ void* os_to_page(void *addr,std::size_t length,bool exec){
 	if (exec)
 		prot |= PROT_EXEC;
 		
-	void* ret = mmap(addr,length,prot,MAP_PRIVATE|MAP_ANON,0,0);
+	void* ret = mmap(addr,length,prot,MAP_PRIVATE|MAP_ANON,-1,0);
 	
 	if (addr!=nullptr && ret!=addr){
 		munmap(addr,length);
