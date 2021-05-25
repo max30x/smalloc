@@ -358,10 +358,10 @@ chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
         return _chunk;
     }
     chunk_node_t* cnode = alloc_chunk_node(&arena->chunk_nodes);
-	chunk_node_init(cnode,size,_chunk->start_addr);
+    chunk_node_init(cnode,size,_chunk->start_addr);
     rb_insert(&arena->chunk_in_use,&cnode->anode);
 
-	_chunk->start_addr += size;
+    _chunk->start_addr += size;
     _chunk->chunk_size -= size;
     insert_map(arena,_chunk,dirty);
     return cnode;
@@ -789,8 +789,7 @@ void* alloc_small(arena_t* arena,std::size_t size){
     return ret;
 }
 
-void alloc_small_batch(arena_t* arena,std::size_t size,void** ptrs,int want){
-    int binid = size_class(size);
+void alloc_small_batch(arena_t* arena,int binid,void** ptrs,int want){
     if (binid>=NBINS)
         return;
     spanbin_t* bin = &arena->bins[binid];
@@ -975,6 +974,7 @@ void dalloc_small(arena_t* arena,void* ptr){
     else
     	rb_delete(&bin->spans,&span->anode);
     smutex_unlock(&bin->mtx);
+
     if (try_link_spanlist(arena,span))
         return;
 
@@ -1002,15 +1002,25 @@ void* alloc_large(arena_t* arena,std::size_t size){
     return (void*)span->start_pos;
 }
 
-void alloc_large_batch(arena_t* arena,std::size_t size,void** ptrs,int want){
-    int binid = size_class(size);
-    size = regsize_to_bin[binid];
+void alloc_large_batch(arena_t* arena,int binid,void** ptrs,int want){
+    //int binid = size_class(size);
+    std::size_t size = regsize_to_bin[binid];
+    int _get = 0;
+    for (;_get<want;++_get){
+        span_t* span = try_unlink_spanlist(arena,binid);
+        if (span==nullptr)
+            break;
+        //lnode_init(&span->ldirty);
+        ptrs[_get] = (void*)span->start_pos;
+    }
+    if (_get == want)
+        return;
     smutex_lock(&arena->arena_mtx);
-    for (int i=0;i<want;++i){
+    for (;_get<want;++_get){
         span_t* span = new_span(arena,size);
-        lnode_init(&span->ldirty);
+        //lnode_init(&span->ldirty);
         sbits_large(span->start_pos,span->spansize,Y,true,binid);
-        ptrs[i] = (void*)span->start_pos;
+        ptrs[_get] = (void*)span->start_pos;
     }
     smutex_unlock(&arena->arena_mtx);
 }

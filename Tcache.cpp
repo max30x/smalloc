@@ -76,8 +76,8 @@ void* smalloc(std::size_t size){
             tbin->size = regsize_to_bin[i];
             tbin->ptrs = chunk+ptrnum;
             int alloc_num = smax(tbin->ncached>>tbin->ratio,1);
-            (i>=NBINS) ? alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num)
-                       : alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,alloc_num);
+            (i>=NBINS) ? alloc_large_batch(tc.arena,i,tbin->ptrs,alloc_num)
+                       : alloc_small_batch(tc.arena,i,tbin->ptrs,alloc_num);
             tbin->avail = alloc_num;
             ptrnum += tbin->ncached;
         }
@@ -89,8 +89,8 @@ void* smalloc(std::size_t size){
         if (tbin->avail==0){
             int _ratio = (tbin->ratio!=0) ? --tbin->ratio : 0;
             int fillnum = tbin->ncached >> _ratio;
-            (binid<NBINS) ? alloc_small_batch(tc.arena,tbin->size,tbin->ptrs,fillnum)
-                          : alloc_large_batch(tc.arena,tbin->size,tbin->ptrs,fillnum);
+            (binid<NBINS) ? alloc_small_batch(tc.arena,binid,tbin->ptrs,fillnum)
+                          : alloc_large_batch(tc.arena,binid,tbin->ptrs,fillnum);
             tbin->avail += fillnum;
             slog(LEVELB,"fill tbin(%d),fill %d items\n",binid,fillnum);
         }
