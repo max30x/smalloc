@@ -252,6 +252,28 @@ void cal_rc_pagenum(std::size_t rcsize){
     slog(LEVELA,"rc_pagenum:%d rc_maxsize:%lu rc_headersize:%lu\n",rc_pagenum,rc_maxsize,rc_headersize);
 }
 
+int size_class(std::size_t size){
+    if (size>regsize_to_bin[NBINS+NLBINS-1])
+        return -1;
+    else if (size<=8)
+        return 0;
+    else if (size<=16)
+        return 1;
+    int ret = 0;
+    if (size<=64){
+        if ((size&0xf)!=0)
+            ++ret;
+        return ret + (size>>4);
+    }
+    int index = ff1_long(size);
+    if ((size&((1<<(index-2))-1))!=0)
+        ++ret;
+    int diff = index - 6;
+    ret += diff<<2;
+    size >>= (diff+4);
+    return ret + (size&3) + 4;
+}
+
 span_t* pid_to_spanmeta(intptr_t chunkaddr,int pid){
     return (span_t*)(chunkaddr+(rc_pagenum<<SBITSSHIFT)+(pid-1)*sizeof(span_t));
 }
@@ -494,28 +516,6 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty){
     }else
         chunk_to_map(arena,chunk,dirty);
     return;
-}
-
-int size_class(std::size_t size){
-    if (size>regsize_to_bin[NBINS+NLBINS-1])
-        return -1;
-    if (size<=8)
-        return 0;
-    if (size<=16)
-        return 1;
-    int ret = 0;
-    if (size<=64){
-        if ((size&0xf)!=0)
-            ++ret;
-        return ret + (size>>4);
-    }
-    int index = ff1_long(size);
-    if ((size&((1<<(index-2))-1))!=0)
-        ++ret;
-    int diff = index - 6;
-    ret += 4*diff;
-    size >>= (diff+4);
-    return ret + (size&3) + 4;
 }
 
 void init_span(span_t* span,std::size_t spansize,std::size_t regsize,int regnum){
@@ -1003,14 +1003,12 @@ void* alloc_large(arena_t* arena,std::size_t size){
 }
 
 void alloc_large_batch(arena_t* arena,int binid,void** ptrs,int want){
-    //int binid = size_class(size);
     std::size_t size = regsize_to_bin[binid];
     int _get = 0;
     for (;_get<want;++_get){
         span_t* span = try_unlink_spanlist(arena,binid);
         if (span==nullptr)
             break;
-        //lnode_init(&span->ldirty);
         ptrs[_get] = (void*)span->start_pos;
     }
     if (_get == want)
@@ -1018,7 +1016,6 @@ void alloc_large_batch(arena_t* arena,int binid,void** ptrs,int want){
     smutex_lock(&arena->arena_mtx);
     for (;_get<want;++_get){
         span_t* span = new_span(arena,size);
-        //lnode_init(&span->ldirty);
         sbits_large(span->start_pos,span->spansize,Y,true,binid);
         ptrs[_get] = (void*)span->start_pos;
     }

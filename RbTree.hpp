@@ -115,20 +115,16 @@ struct rb_iter{
             now = now->rson;
             while (now->lson!=nullptr)
                 now = now->lson;
-            return prev;
-        }
-        if (now->father==nullptr){
+        }else if (now->father==nullptr){
             now = nullptr;
-            return prev;
-        }
-        if (now->father->lson!=nullptr && equal(now->father->lson,now)){
+        }else if (now->father->lson!=nullptr && equal(now->father->lson,now)){
             now = now->father;
-            return prev;
-        }
-        while (now->father!= nullptr && now->father->rson!=nullptr && equal(now->father->rson,now)){
+        }else{
+            while (now->father!= nullptr && now->father->rson!=nullptr && equal(now->father->rson,now)){
+                now = now->father;
+            }
             now = now->father;
         }
-        now = now->father;
         return prev;
     }
 
