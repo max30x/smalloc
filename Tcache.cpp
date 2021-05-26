@@ -14,7 +14,6 @@ static pthread_key_t pkey;
 
 extern "C" {
     void* smalloc(std::size_t size);
-    void* scalloc(std::size_t nitems,std::size_t size);
     void sfree(void* ptr);
 }
 
@@ -42,7 +41,7 @@ void* smalloc(std::size_t size){
         pthread_key_create(&pkey,thread_cleanup);
         pthread_setspecific(pkey,&tc);  
         bool value = false;
-        if (atomic_load(&no)==-1){
+        if (unlikely(atomic_load(&no)==-1)){
             int myturn = -1;
             while ((myturn=atomic_fetch_add(&inited_no,1))<CPUNUM_S)
                 init_arena(&arenas[myturn]);
@@ -127,11 +126,4 @@ void sfree(void* ptr){
         slog(LEVELB,"purge tbin(%d),throw %d items\n",binid,thrownum);
     }
     tbin->ptrs[tbin->avail++] = ptr;
-}
-
-void* scalloc(std::size_t nitems,std::size_t size){
-    std::size_t _size = nitems*size;
-    void* ptr = smalloc(_size);
-    memset(ptr,0,_size);
-    return ptr;
 }

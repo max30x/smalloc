@@ -370,7 +370,9 @@ chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
         tree = &arena->chunk_cached_szad;
     
     chunk_node_t kchunk;
-    chunk_node_init(&kchunk,size,-1);
+    kchunk.chunk_size = size;
+    kchunk.start_addr = -1;
+    rbnode_init(&kchunk.anode,&kchunk,true);
     chunk_node_t* _chunk = fsearch_cnode(tree,&kchunk);
     if (_chunk==nullptr)
     	return nullptr;
@@ -485,7 +487,8 @@ void* new_chunk(arena_t* arena,std::size_t size){
 
 void delete_chunk(arena_t* arena,void* addr,bool dirty){
     chunk_node_t snode;
-    chunk_node_init(&snode,0,(intptr_t)addr);
+    snode.start_addr = (intptr_t)addr;
+    rbnode_init(&snode.anode,&snode,true);
     chunk_node_t* chunk = search_cnode(&arena->chunk_in_use,&snode.anode);
     // if,under any circumstances,this function is called with dirty false,then crash.
     rb_delete(&arena->chunk_in_use,&chunk->anode);
@@ -642,8 +645,9 @@ span_t* span_from_map(arena_t* arena,std::size_t size,bool dirty){
         tree = &arena->spanavail;
     
     span_t kspan;
-    init_span(&kspan,size,-1,-1);
+    kspan.spansize = size;
     kspan.start_pos = -1;
+    rbnode_init(&kspan.anode,&kspan,true);
     span_t* _span = fsearch_span(tree,&kspan);
     if (_span==nullptr)
         return nullptr; 
