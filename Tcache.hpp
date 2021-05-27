@@ -21,8 +21,22 @@ struct tbin{
 using tbin_t = struct tbin;
 
 struct tcache{
+    slnode_t tnode;
     arena_t* arena;
     tbin_t bins[NBINS+NLBINS];
 };
 
 using tcache_t = struct tcache;
+
+struct tcaches{
+    smutex_t mtx;
+    slnode_t tlink;
+
+    int tcsize;
+    char* chunk;
+    int offset;
+    int limit;
+    slnode_t mlink;
+};
+
+using tcaches_t = struct tcaches;
