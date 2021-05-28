@@ -93,7 +93,6 @@ do{                                     \
     }                                                                       \
     }while(0)
 #else
-    #define slog(s,...) \
-    do{}while(0)
+    #define slog(s,...)
 #endif
     
