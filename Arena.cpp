@@ -328,6 +328,10 @@ void delete_map(arena_t* arena,chunk_node_t* chunk,bool dirty){
     rb_delete(&arena->chunk_cached_ad,&chunk->bnode);
 }
 
+void init_arena_meta(){
+    cal_rc_pagenum(SPANCSIZE);
+}
+
 void init_arena(arena_t* arena){
     arena->threads = 0;
     smutex_init(&arena->arena_mtx);
@@ -343,8 +347,6 @@ void init_arena(arena_t* arena){
 
     rb_init(&arena->spanavail,bigger_szad_span,equal_szad_span);
     rb_init(&arena->spandirty,bigger_szad_span,equal_szad_span);
-
-    cal_rc_pagenum(SPANCSIZE);
 
     lnode_init(&arena->ldirty);
     lnode_init(&arena->lchunkdirty);

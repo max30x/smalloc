@@ -100,11 +100,11 @@ void tcaches_cleanup(){
 void* smalloc(std::size_t size){
     if (unlikely(!tc_inited)){
         if (unlikely(atomic_load(&no)==-1)){
-            int myturn = -1;
-            while ((myturn=atomic_fetch_add(&inited_no,1))<CPUNUM_S)
-                init_arena(&arenas[myturn]);
             bool value = false;
             if (atomic_compare_exchange_strong(&arenas_inited,&value,true)){
+                init_arena_meta();
+                for (int i=0;i<CPUNUM_S;++i)
+                    init_arena(&arenas[i]);
                 std::size_t _bigchunk_size = 0;
                 for (int i=0;i<NBINS+NLBINS;++i){
                     int ncached = smax(CACHESIZE/regsize_to_bin[i],NCACHEDMIN);

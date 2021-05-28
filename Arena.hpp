@@ -223,6 +223,7 @@ int size_class(std::size_t size);
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr);
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid);
 
+void init_arena_meta();
 void init_arena(arena_t* arena);
 void clear_arena(arena_t* arena);
 void* alloc_small(arena_t* arena,std::size_t size);
