@@ -124,13 +124,15 @@ void* smalloc(std::size_t size){
         smutex_lock(&tcs.mtx);
         tc = take_tcache();
         if (tc==nullptr){
+            tc = new_tcache();
+            smutex_unlock(&tcs.mtx);
             int myid = atomic_fetch_add(&no,1);
             myid %= CPUNUM_S;
             arena_t* arena = &arenas[myid];
-            tc = new_tcache();
             init_tcache(tc,arena);
+        }else{
+            smutex_unlock(&tcs.mtx);
         }
-        smutex_unlock(&tcs.mtx);
         atomic_fetch_add(&tc->arena->threads,1);
         pthread_key_create(&pkey,thread_cleanup);
         pthread_setspecific(pkey,tc);
