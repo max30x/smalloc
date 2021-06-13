@@ -11,7 +11,11 @@
 
 #define CHUNKSIZE 2*1024*1024
 
+struct arena;
+
 struct chunk_node{
+    struct arena* arena;
+
     intptr_t start_addr;
 
     std::size_t chunk_size;
@@ -27,6 +31,8 @@ struct chunk_node{
 };
 
 using chunk_node_t = struct chunk_node;
+
+#define CHUNKHEADER sizeof(chunk_node_t)
 
 template<typename T>
 struct mnode{
