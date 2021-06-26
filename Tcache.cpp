@@ -105,7 +105,54 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
     else
         dfunc = dalloc_large;
 
-    
+    int lastid = bin->avail-1;
+    while (thrownum>0){
+        intptr_t addr = (intptr_t)bin->ptrs[lastid];
+        intptr_t chunk_addr = addr & ~(SPANCSIZE-1);
+        chunk_node_t* chunk = (chunk_node_t*)chunk_addr;
+        arena_t* arena = chunk->arena;
+        bool first = true;
+        smutex_lock(&arena->arena_mtx);
+        for (int i=lastid;thrownum>0&&i>=0;--i){
+            void* ptr = bin->ptrs[i];
+            if (ptr==nullptr)
+                continue;
+            addr = (intptr_t)bin->ptrs[i];
+            if (!ptr_in_chunk(chunk->start_addr,chunk->chunk_size,addr)){
+                if (first){
+                    lastid = i;
+                    first = false;
+                }
+                continue;
+            }
+            dfunc(arena,(void*)addr);
+            bin->ptrs[i] = nullptr;
+            --thrownum;
+        }
+        smutex_unlock(&arena->arena_mtx);
+    }
+    if (thrownum==bin->avail)
+        return;
+    int firstid = 0;
+    while (bin->ptrs[firstid]==nullptr)
+        ++firstid;
+    int firstid_ = firstid;
+    int left = bin->avail-thrownum;
+    while (left>0){
+        if (bin->ptrs[firstid]==nullptr){
+            int nextid = firstid+1;
+            while (bin->ptrs[nextid]==nullptr)
+                ++nextid;
+            void* ptr_ = bin->ptrs[nextid];
+            bin->ptrs[nextid] = nullptr;
+            bin->ptrs[firstid] = ptr_;
+        }
+        ++firstid;
+        --left;
+    }
+    if (firstid_==0)
+        return;
+    memcpy(bin->ptrs,bin->ptrs+firstid_,left);
 }
 
 void* smalloc(std::size_t size){
@@ -182,20 +229,10 @@ void sfree(void* ptr){
     int binid = BINID(bs);
     tbin_t* tbin = &tc->bins[binid];
     if (unlikely(tbin->avail==tbin->ncached)){
-        //int type = TYPE(bs);
         int type = (binid<NBINS) ? SMALL : LARGE;
         int thrownum = (tbin->avail<(1<<2)) ? tbin->avail : tbin->avail>>2;
-
         purge_bin(tbin,type,thrownum);
         tbin->avail -= thrownum;
-    /*
-        for (int i=0;i<thrownum;++i){
-            void* nowptr = tbin->ptrs[tbin->avail-1];
-            (type==SMALL) ? dalloc_small(tc->arena,nowptr)
-                          : dalloc_large(tc->arena,nowptr);
-            --tbin->avail;
-        }
-    */
         slog(LEVELB,"purge tbin(%d),throw %d items\n",binid,thrownum);
     }
     tbin->ptrs[tbin->avail++] = ptr;
