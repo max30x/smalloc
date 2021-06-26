@@ -88,6 +88,7 @@ void arenas_cleanup(){
 }
 
 void tcaches_cleanup(){
+    before_arena_destroy();
     arenas_cleanup();
     slnode_t* node = tcs.mlink.next;
     while (node!=nullptr){
@@ -97,12 +98,22 @@ void tcaches_cleanup(){
     }
 }
 
+void purge_bin(tbin_t* bin,int type,int thrownum){
+    void (*dfunc)(arena_t*,void*);
+    if (type==SMALL)
+        dfunc = dalloc_small;
+    else
+        dfunc = dalloc_large;
+
+    
+}
+
 void* smalloc(std::size_t size){
     if (unlikely(!tc_inited)){
         if (unlikely(atomic_load(&no)==-1)){
             bool value = false;
             if (atomic_compare_exchange_strong(&arenas_inited,&value,true)){
-                init_arena_meta();
+                before_arena_init();
                 for (int i=0;i<CPUNUM_S;++i)
                     init_arena(&arenas[i]);
                 std::size_t _bigchunk_size = 0;
@@ -162,7 +173,7 @@ void sfree(void* ptr){
     intptr_t _ptr = (intptr_t)ptr;
     if ((_ptr&(CHUNKSIZE-1))==0){
         // todo:need a better way to tell if this is a huge chunk
-        dalloc_huge(tc->arena,ptr);
+        search_and_dalloc_huge(ptr);
         return;
     }
     intptr_t chunkaddr = addr_to_chunk(_ptr);
@@ -171,14 +182,20 @@ void sfree(void* ptr){
     int binid = BINID(bs);
     tbin_t* tbin = &tc->bins[binid];
     if (unlikely(tbin->avail==tbin->ncached)){
-        int type = TYPE(bs);
+        //int type = TYPE(bs);
+        int type = (binid<NBINS) ? SMALL : LARGE;
         int thrownum = (tbin->avail<(1<<2)) ? tbin->avail : tbin->avail>>2;
+
+        purge_bin(tbin,type,thrownum);
+        tbin->avail -= thrownum;
+    /*
         for (int i=0;i<thrownum;++i){
             void* nowptr = tbin->ptrs[tbin->avail-1];
             (type==SMALL) ? dalloc_small(tc->arena,nowptr)
                           : dalloc_large(tc->arena,nowptr);
             --tbin->avail;
         }
+    */
         slog(LEVELB,"purge tbin(%d),throw %d items\n",binid,thrownum);
     }
     tbin->ptrs[tbin->avail++] = ptr;

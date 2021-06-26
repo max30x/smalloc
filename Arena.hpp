@@ -229,7 +229,11 @@ int size_class(std::size_t size);
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr);
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid);
 
-void init_arena_meta();
+bool ptr_in_chunk(intptr_t chunk_addr,std::size_t chunk_size,intptr_t addr);
+
+void before_arena_init();
+void before_arena_destroy();
+
 void init_arena(arena_t* arena);
 void clear_arena(arena_t* arena);
 void* alloc_small(arena_t* arena,std::size_t size);
@@ -240,3 +244,4 @@ void alloc_large_batch(arena_t* arena,int binid,void** ptrs,int want);
 void dalloc_large(arena_t* arena,void* ptr);
 void* alloc_huge(arena_t* arena,std::size_t size);
 void dalloc_huge(arena_t* arena,void* ptr);
+void search_and_dalloc_huge(void* ptr);

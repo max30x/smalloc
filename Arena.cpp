@@ -4,6 +4,9 @@ static int rc_pagenum;
 static std::size_t rc_maxsize;
 static std::size_t rc_headersize;
 
+static smutex_t hcs_mtx;
+static rb_tree_t<chunk_node_t> huge_chunks;
+
 chunk_node_t* make_chunknode(arena_t* arena,intptr_t raw_chunk,bool huge);
 
 static bool bigger_ad(const chunk_node_t* c1,const chunk_node_t* c2){
@@ -331,8 +334,37 @@ void delete_map(arena_t* arena,chunk_node_t* chunk,bool dirty){
     rb_delete(&arena->chunk_cached_ad,&chunk->bnode);
 }
 
-void init_arena_meta(){
+void reg_chunk(chunk_node_t* cnode,bool huge){
+    if (likely(!huge)){
+        arena_t* arena_ = cnode->arena;
+        rb_insert(&arena_->chunk_in_use,&cnode->anode);
+    }else{
+        smutex_lock(&hcs_mtx);
+        rb_insert(&huge_chunks,&cnode->anode);
+        smutex_unlock(&hcs_mtx);
+    }
+}
+
+void unreg_chunk(chunk_node_t* cnode,bool huge){
+    if (likely(!huge)){
+        arena_t* arena_ = cnode->arena;
+        rb_delete(&arena_->chunk_in_use,&cnode->anode);
+    }else{
+        smutex_lock(&hcs_mtx);
+        rb_delete(&huge_chunks,&cnode->anode);
+        smutex_unlock(&hcs_mtx);
+    }
+}
+
+
+void before_arena_init(){
+    rb_init(&huge_chunks,bigger_ad,equal_ad);
+    smutex_init(&hcs_mtx);
     cal_rc_pagenum(SPANCSIZE);
+}
+
+void before_arena_destroy(){
+    cleanup_map(&huge_chunks);
 }
 
 void init_arena(arena_t* arena){
@@ -367,7 +399,7 @@ void init_arena(arena_t* arena){
         init_spanlists(&arena->spanlists[i],i);
 }
 
-void* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
+chunk_node_t* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
     rb_tree_t<chunk_node_t>* tree;
     if (dirty)
         tree = &arena->chunk_dirty_szad;
@@ -382,15 +414,17 @@ void* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
     if (_chunk==nullptr)
     	return nullptr;
     delete_map(arena,_chunk,dirty);
-    return (void*)_chunk->start_addr;
+
+    // this is the start of the chunk
+    return _chunk;
 }
 
 chunk_node_t* make_chunknode(arena_t* arena,intptr_t raw_chunk,bool huge){
     chunk_node_t* cnode;
-    if (huge)
-        cnode = alloc_chunk_node(&arena->chunk_nodes);
-    else
+    if (likely(!huge))
         cnode = (chunk_node_t*)raw_chunk;
+    else
+        cnode = alloc_chunk_node(&arena->chunk_nodes);
     return cnode;
 }
 
@@ -406,27 +440,26 @@ chunk_node_t* split_chunk(arena_t* arena,chunk_node_t* chunk,std::size_t size){
 }
 
 chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty,bool huge){
-    void* raw_chunk = search_chunk_from_map(arena,size,dirty);
-    if (raw_chunk==nullptr)
+    chunk_node_t* _chunk = search_chunk_from_map(arena,size,dirty);
+    if (_chunk==nullptr)
         return nullptr;
 
-    chunk_node_t* _chunk = (chunk_node_t*)raw_chunk;
     if (_chunk->chunk_size==size){
         if (huge){
+            intptr_t start_addr = _chunk->start_addr;
             _chunk = alloc_chunk_node(&arena->chunk_nodes);
-            chunk_node_init(_chunk,arena,size,_chunk->start_addr);
+            chunk_node_init(_chunk,arena,size,start_addr);
         }
-        rb_insert(&arena->chunk_in_use,&_chunk->anode);
+        reg_chunk(_chunk,huge);
         return _chunk;
     }
     
     chunk_node_t* left = split_chunk(arena,_chunk,size);
-    chunk_node_init(left,arena,left->chunk_size,left->start_addr);
     insert_map(arena,left,dirty);
 
     chunk_node_t* cnode = make_chunknode(arena,_chunk->start_addr,huge);
     chunk_node_init(cnode,arena,size,_chunk->start_addr);
-    rb_insert(&arena->chunk_in_use,&cnode->anode);
+    reg_chunk(cnode,huge);
     return cnode;
 }
 
@@ -498,7 +531,7 @@ void* new_chunk(arena_t* arena,std::size_t size,bool huge){
         if (chunk->chunk_size==size){
             arena->chunk_spared = nullptr;
             chunk = make_chunknode(arena,chunk->start_addr,huge);
-            rb_insert(&arena->chunk_in_use,&chunk->anode);
+            reg_chunk(chunk,huge);
             return (void*)chunk->start_addr;
         }
         arena->chunk_spared = split_chunk(arena,chunk,size);
@@ -506,7 +539,7 @@ void* new_chunk(arena_t* arena,std::size_t size,bool huge){
 
         chunk_node_t* cnode = make_chunknode(arena,chunk->start_addr,huge);
         chunk_node_init(cnode,arena,size,chunk->start_addr);
-        rb_insert(&arena->chunk_in_use,&cnode->anode);
+        reg_chunk(cnode,huge);
         return (void*)cnode->start_addr;
     }
 
@@ -519,16 +552,25 @@ void* new_chunk(arena_t* arena,std::size_t size,bool huge){
         return (void*)chunk->start_addr;
         
     chunk_node_t* cnode = base_alloc(arena,CHUNKSIZE,size,false,huge);
-    rb_insert(&arena->chunk_in_use,&cnode->anode);
+    reg_chunk(cnode,huge);
     return (void*)cnode->start_addr;
 }
 
-void delete_chunk(arena_t* arena,void* addr,bool dirty,bool huge){
-    chunk_node_t snode;
-    snode.start_addr = (intptr_t)addr;
-    rbnode_init(&snode.anode,&snode,true);
-    chunk_node_t* chunk = search_cnode(&arena->chunk_in_use,&snode.anode);
-    rb_delete(&arena->chunk_in_use,&chunk->anode);
+void delete_chunk(arena_t* arena,void* addr,chunk_node_t* chunk,bool dirty,bool huge){
+    if (likely(chunk==nullptr)){
+        chunk_node_t snode;
+        snode.start_addr = (intptr_t)addr;
+        rbnode_init(&snode.anode,&snode,true);
+        rb_tree_t<chunk_node_t>* target;
+        if (likely(!huge)){
+            chunk = search_cnode(&arena->chunk_in_use,&snode.anode);
+        }else{
+            smutex_lock(&hcs_mtx);
+            chunk = search_cnode(&huge_chunks,&snode.anode);
+            smutex_unlock(&hcs_mtx);
+        }
+    }
+    unreg_chunk(chunk,huge);
 
     if (huge){
         chunk_node_t* chunk_ = chunk;
@@ -537,9 +579,9 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty,bool huge){
         dalloc_node(&arena->chunk_nodes,chunk_);
     }
 
-    if (!dirty)
+    if (!dirty){
         chunk_to_map(arena,chunk,dirty);
-    else if (arena->chunk_spared==nullptr){
+    }else if (arena->chunk_spared==nullptr){
         arena->chunk_spared = chunk;
         arena->dirty_size += chunk->chunk_size;
         // ALWAYS have to take special care of chunk_spared
@@ -561,9 +603,16 @@ void delete_chunk(arena_t* arena,void* addr,bool dirty,bool huge){
         link_chunkdirty_arena(arena,chunk);
         arena->dirty_size += chunk->chunk_size;
         chunk_to_map(arena,_chunk_spared,dirty);
-    }else
+    }else{
         chunk_to_map(arena,chunk,dirty);
+    }
     return;
+}
+
+// have to make sure 'chunk_size' is a power of 2
+bool ptr_in_chunk(intptr_t chunk_addr,std::size_t chunk_size,intptr_t addr){
+    addr &= ~(chunk_size-1);
+    return chunk_addr == addr;
 }
 
 void init_span(span_t* span,std::size_t spansize,std::size_t regsize,int regnum){
@@ -872,7 +921,7 @@ bool behind_addr_span(span_t* a,span_t* b){
 
 bool try_delete_span_chunk(arena_t* arena,span_t* span,bool dirty){
     if (span->spansize==rc_maxsize){
-        delete_chunk(arena,(void*)(addr_to_chunk(span->start_pos)),dirty,false);
+        delete_chunk(arena,(void*)(addr_to_chunk(span->start_pos)),nullptr,dirty,false);
         return true;
     }
     return false;
@@ -1097,7 +1146,24 @@ void* alloc_huge(arena_t* arena,std::size_t size){
 
 void dalloc_huge(arena_t* arena,void* ptr){
     smutex_lock(&arena->arena_mtx);
-    delete_chunk(arena,ptr,true,true);
+    delete_chunk(arena,ptr,nullptr,true,true);
+    std::size_t wanted = should_purge(arena);
+    if (unlikely(wanted>0))
+        purge(arena,wanted);
+    smutex_unlock(&arena->arena_mtx);
+}
+
+void search_and_dalloc_huge(void* ptr){
+    chunk_node_t snode;
+    snode.start_addr = (intptr_t)ptr;
+    rbnode_init(&snode.anode,&snode,true);
+    smutex_lock(&hcs_mtx);
+    chunk_node_t* chunk = search_cnode(&huge_chunks,&snode.anode);
+    smutex_unlock(&hcs_mtx);
+
+    arena_t* arena = chunk->arena;
+    smutex_lock(&arena->arena_mtx);
+    delete_chunk(chunk->arena,nullptr,chunk,true,true);
     std::size_t wanted = should_purge(arena);
     if (unlikely(wanted>0))
         purge(arena,wanted);
