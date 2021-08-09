@@ -263,7 +263,7 @@ void cal_rc_pagenum(std::size_t rcsize){
         ++rc_pagenum;
     }
     rc_maxsize = rc_pagenum*PAGE;
-    rc_headersize = NEXT_ALIGN(rc_pagenum*(sizeof(span_t)+sizeof(sbits))+CHUNKHEADER,PAGE);
+    rc_headersize = NEXT_ALIGN(rc_pagenum*(sizeof(span_t)+sizeof(sbits)),PAGE)+(PAGE-CHUNKHEADER);
     slog(LEVELA,"rc_pagenum:%d rc_maxsize:%lu rc_headersize:%lu\n",rc_pagenum,rc_maxsize,rc_headersize);
 }
 
@@ -410,7 +410,7 @@ void init_arena(arena_t* arena){
         init_spanlists(&arena->spanlists[i],i);
 }
 
-chunk_node_t* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty,bool need_embed){
+chunk_node_t* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
     rb_tree_t<chunk_node_t>* tree;
     if (dirty)
         tree = &arena->chunk_dirty_szad;
@@ -419,8 +419,6 @@ chunk_node_t* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty,b
     
     chunk_node_t kchunk;
     kchunk.chunk_size = size;
-    if (need_embed)
-        kchunk.chunk_size += CHUNKHEADER;
     kchunk.start_addr = -1;
     rbnode_init(&kchunk.anode,&kchunk,true);
     chunk_node_t* _chunk = fsearch_cnode(tree,&kchunk);
@@ -430,7 +428,7 @@ chunk_node_t* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty,b
     return _chunk;
 }
 
-chunk_node_t* make_chunknode_and_init(arena_t* arena,intptr_t start_addr,std::size_t size,bool huge){
+chunk_node_t* make_chunknode(arena_t* arena,intptr_t start_addr,bool huge){
     chunk_node_t* cnode;
     if (likely(ISEMBED(huge)))
         cnode = (chunk_node_t*)start_addr;
@@ -452,26 +450,22 @@ chunk_node_t* split_chunk(arena_t* arena,chunk_node_t* chunk,std::size_t size){
     return left;
 }
 
+// if not huge,size includes the size of chunk header
 chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty,bool huge){
-    chunk_node_t* _chunk = search_chunk_from_map(arena,size,dirty,ISEMBED(huge));
+    chunk_node_t* _chunk = search_chunk_from_map(arena,size,dirty);
     if (_chunk==nullptr)
         return nullptr;
 
-    if (_chunk->chunk_size==size){
-        _chunk = make_chunknode(arena,_chunk->start_addr,huge);
-        chunk_node_init(_chunk,arena,size,_chunk->start_addr,ISEMBED(huge));
-        reg_chunk(_chunk,huge);
-        return _chunk;
+    if (_chunk->chunk_size>size){
+        chunk_node_t* left = split_chunk(arena,_chunk,size);
+        if (left!=nullptr)
+            insert_map(arena,left,dirty);
     }
-    
-    chunk_node_t* left = split_chunk(arena,_chunk,size);
-    if (left!=nullptr)
-        insert_map(arena,left,dirty);
 
-    chunk_node_t* cnode = make_chunknode(arena,_chunk->start_addr,huge);
-    chunk_node_init(cnode,arena,_chunk->chunk_size,_chunk->start_addr,ISEMBED(huge));
-    reg_chunk(cnode,huge);
-    return cnode;
+    _chunk = make_chunknode(arena,_chunk->start_addr,huge);
+    chunk_node_init(_chunk,arena,_chunk->chunk_size,_chunk->start_addr,ISEMBED(huge));
+    reg_chunk(_chunk,huge);
+    return _chunk;
 }
 
 bool behind_addr(chunk_node_t* c1,chunk_node_t* c2){
@@ -534,8 +528,6 @@ void* new_chunk(arena_t* arena,std::size_t size,bool huge){
     // because every chunk need to be aligned to CHUNKSIZE
     // and that's because the chunk used for span allocating must be aligned to a multiple of CHUNKSIZE
     // if break this,then chunks CAN NOT be merged
-    if (ISEMBED(huge))
-        size += CHUNKHEADER;
     size = NEXT_ALIGN(size,CHUNKSIZE);
     chunk_node_t* chunk = arena->chunk_spared;
     if (chunk!=nullptr && chunk->chunk_size>=size){
