@@ -13,6 +13,10 @@
 
 struct arena;
 
+// when we take a chunk from arena,
+// header of this chunk should be embedded into the start of this chunk.
+// but attributes like 'start_addr' and 'chunk_size' are about the whole chunk,
+// which means CHUNKHEADER size is not taken into consideration
 struct chunk_node{
     struct arena* arena;
 
@@ -33,6 +37,14 @@ struct chunk_node{
 using chunk_node_t = struct chunk_node;
 
 #define CHUNKHEADER sizeof(chunk_node_t)
+
+#define ISEMBED(huge) (!huge)
+
+#define TORAWCHUNK(chunk)               \
+do{                                     \
+    chunk->chunk_size += CHUNKHEADER;   \
+    chunk->start_addr -= CHUNKHEADER;   \
+}while (0)              
 
 template<typename T>
 struct mnode{

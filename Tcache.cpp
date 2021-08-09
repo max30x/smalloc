@@ -24,8 +24,8 @@ void init_tcaches(){
     slnode_init(&tcs.mlink);
     slnode_init(&tcs.tlink);
     tcs.tcsize = sizeof(tcache_t);
+    tcs.chunk = (char*)os_to_page(nullptr,CHUNKSIZE,false);
     tcs.limit = CHUNKSIZE;
-    tcs.chunk = (char*)os_to_page(nullptr,tcs.limit,false);
     tcs.offset = 0;
 }
 
@@ -230,7 +230,7 @@ void sfree(void* ptr){
     tbin_t* tbin = &tc->bins[binid];
     if (unlikely(tbin->avail==tbin->ncached)){
         int type = (binid<NBINS) ? SMALL : LARGE;
-        int thrownum = (tbin->avail<(1<<2)) ? tbin->avail : tbin->avail>>2;
+        int thrownum = (tbin->avail<4) ? tbin->avail : tbin->avail>>2;
         purge_bin(tbin,type,thrownum);
         tbin->avail -= thrownum;
         slog(LEVELB,"purge tbin(%d),throw %d items\n",binid,thrownum);
