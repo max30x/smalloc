@@ -1,8 +1,8 @@
 #include "Arena.hpp"
 
-static int rc_pagenum;
-static std::size_t rc_maxsize;
-static std::size_t rc_headersize;
+static int sc_pagenum;
+static std::size_t sc_maxsize;
+static std::size_t sc_headersize;
 
 static smutex_t hcs_mtx;
 static rb_tree_t<chunk_node_t> huge_chunks;
@@ -158,7 +158,7 @@ void dalloc_node(mnode_t<T>* nodes,T* node){
 
 template<typename T>
 void nodes_init(mnode_t<T>* nodes){
-    smutex_init(&nodes->mtx);
+    smutex_init(&nodes->mtx,false);
     rb_init(&nodes->chunk_in_use,bigger_ad,equal_ad);
     nodes->node_free = nullptr;
     nodes->node_chunk = nullptr;
@@ -220,12 +220,12 @@ void clear_arena(arena_t* arena){
 }
 
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr){
-    intptr_t content = chunkaddr + rc_headersize - 1;
+    intptr_t content = chunkaddr + sc_headersize - 1;
     return NEXT_ALIGN(addr-content,PAGE)>>PAGESHIFT;
 }
 
 void init_spanbin(spanbin_t* bin,std::size_t regsize){
-    smutex_init(&bin->mtx);
+    smutex_init(&bin->mtx,false);
     bin->cur = nullptr;
     bin->spannum = 0;
     bin->span_not_full = 0;
@@ -233,7 +233,7 @@ void init_spanbin(spanbin_t* bin,std::size_t regsize){
     int span_minsize = 16*1024;
     int _regnum = span_minsize/regsize;
     int regnum = smax(REGMAX,_regnum);
-    while (regnum*regsize>rc_maxsize)
+    while (regnum*regsize>sc_maxsize)
         --regnum;
     bin->regnum = regnum;
     bin->regsize = regsize;
@@ -242,7 +242,7 @@ void init_spanbin(spanbin_t* bin,std::size_t regsize){
 }
 
 void init_spanlists(span_list_t* slist,int sizeclass){
-    smutex_init(&slist->mtx);
+    smutex_init(&slist->mtx,false);
     slnode_init(&slist->spans);
     slist->avail = 0;
     int size = regsize_to_bin[sizeclass];
@@ -254,16 +254,16 @@ void init_spanlists(span_list_t* slist,int sizeclass){
 
 void cal_rc_pagenum(std::size_t rcsize){
     std::size_t a = CHUNKHEADER, b = rcsize;
-    rc_pagenum = 0;
+    sc_pagenum = 0;
     for (;;){
         a += sizeof(sbits)+sizeof(span_t);
         b -= PAGE;
         if (a>b)
             break;
-        ++rc_pagenum;
+        ++sc_pagenum;
     }
-    rc_maxsize = rc_pagenum*PAGE;
-    rc_headersize = NEXT_ALIGN(rc_pagenum*(sizeof(span_t)+sizeof(sbits)),PAGE)+(PAGE-CHUNKHEADER);
+    sc_maxsize = sc_pagenum*PAGE;
+    sc_headersize = NEXT_ALIGN(sc_pagenum*(sizeof(span_t)+sizeof(sbits)),PAGE)+(PAGE-CHUNKHEADER);
     slog(LEVELA,"rc_pagenum:%d rc_maxsize:%lu rc_headersize:%lu\n",rc_pagenum,rc_maxsize,rc_headersize);
 }
 
@@ -289,11 +289,9 @@ int size_class(std::size_t size){
     return ret + (size&3) + 4;
 }
 
-// so why don't need to add the size of chunkheader here ?
-// the header or node of this chunk is stored at the start of this chunk
-// so the chunkaddr has already been moved forward to give room for the header
+// just let chunkaddr to be the start address of sbits
 span_t* pid_to_spanmeta(intptr_t chunkaddr,int pid){
-    return (span_t*)(chunkaddr + (rc_pagenum<<SBITSSHIFT) + (pid-1)*sizeof(span_t));
+    return (span_t*)(chunkaddr + (sc_pagenum<<SBITSSHIFT) + (pid-1)*sizeof(span_t));
 }
 
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid){
@@ -370,7 +368,7 @@ void unreg_chunk(chunk_node_t* cnode,bool huge){
 
 void before_arena_init(){
     rb_init(&huge_chunks,bigger_ad,equal_ad);
-    smutex_init(&hcs_mtx);
+    smutex_init(&hcs_mtx,false);
     cal_rc_pagenum(SPANCSIZE);
 }
 
@@ -380,7 +378,7 @@ void before_arena_destroy(){
 
 void init_arena(arena_t* arena){
     arena->threads = 0;
-    smutex_init(&arena->arena_mtx);
+    smutex_init(&arena->arena_mtx,true);
     rb_init(&arena->chunk_in_use,bigger_ad,equal_ad);
 
     nodes_init(&arena->chunk_nodes);
@@ -623,8 +621,8 @@ void delete_chunk(arena_t* arena,void* addr,chunk_node_t* chunk,bool dirty,bool 
 // since we talk about ptr which is in chunk here,
 // so this chunk has to be used for small or large allocations
 // it should be safe to assume there is a CHUNKHEADER
-bool ptr_in_chunk(intptr_t chunk_addr,std::size_t chunk_size,intptr_t addr){
-    addr &= ~(chunk_size-1);
+bool ptr_in_chunk(intptr_t chunk_addr,intptr_t addr){
+    addr &= ~(SPANCSIZE-1);
     return chunk_addr-CHUNKHEADER == addr;
 }
 
@@ -651,7 +649,8 @@ void span_to_bin(span_t* span,spanbin_t* bin){
 
 void sbits_large(intptr_t start_pos,std::size_t size,int alloc,bool dirty,int binid){
     int _dirty = (dirty)?Y:N;
-    intptr_t chunkaddr = addr_to_chunk(start_pos);
+    intptr_t chunkaddr = addr_to_chunk_start(start_pos);
+    chunkaddr = jump_to_sbit(chunkaddr);
     int pid_head = addr_to_pid(chunkaddr,start_pos);
     int pid_tail = addr_to_pid(chunkaddr,start_pos+size-1);
     sbits* bs_head = pid_to_sbits(chunkaddr,pid_head);
@@ -675,7 +674,8 @@ void sbits_large(intptr_t start_pos,std::size_t size,int alloc,bool dirty,int bi
 }
 
 void sbits_small_alloc(intptr_t start_pos,std::size_t size,int binid){
-    intptr_t chunkaddr = addr_to_chunk(start_pos);
+    intptr_t chunkaddr = addr_to_chunk_start(start_pos);
+    chunkaddr = jump_to_sbit(chunkaddr);
     int pid_head = addr_to_pid(chunkaddr,start_pos);
     int pid_tail = addr_to_pid(chunkaddr,start_pos+size-1);
     // slab,slab,slab is everywhere
@@ -692,13 +692,13 @@ void sbits_small_alloc(intptr_t start_pos,std::size_t size,int binid){
 
 // chunkaddr follows chunkheader (assume there is one)
 span_t* chunk_to_bigspan(void* chunkaddr,arena_t* arena){
-    memset(chunkaddr,0,rc_headersize);
+    memset(chunkaddr,0,sc_headersize);
     intptr_t caddr = (intptr_t)chunkaddr;
-    span_t* span_head = pid_to_spanmeta(caddr,1);
-    span_head->spansize = rc_maxsize;
-    span_head->start_pos = caddr+rc_headersize;
+    span_t* span_head = pid_to_spanmeta(jump_to_sbit(caddr-CHUNKHEADER),1);
+    span_head->spansize = sc_maxsize;
+    span_head->start_pos = caddr+sc_headersize;
     rbnode_init(&span_head->anode,span_head,true);
-    sbits_large(span_head->start_pos,rc_maxsize,N,false,-1);
+    sbits_large(span_head->start_pos,sc_maxsize,N,false,-1);
     return span_head;
 }
 
@@ -731,7 +731,8 @@ span_t* split_bigspan(span_t* span,std::size_t size){
     std::size_t _spansize = span->spansize-size;
     span->spansize = size;
 
-    intptr_t chunkaddr = addr_to_chunk(_spanaddr);
+    intptr_t chunkaddr = addr_to_chunk_start(_spanaddr);
+    chunkaddr = jump_to_sbit(chunkaddr);
     span_t* _span = pid_to_spanmeta(chunkaddr,addr_to_pid(chunkaddr,_spanaddr));
     _span->spansize = _spansize;
     _span->start_pos = _spanaddr;
@@ -934,8 +935,8 @@ bool behind_addr_span(span_t* a,span_t* b){
 }
 
 bool try_delete_span_chunk(arena_t* arena,span_t* span,bool dirty){
-    if (span->spansize==rc_maxsize){
-        delete_chunk(arena,(void*)(addr_to_chunk(span->start_pos)),nullptr,dirty,false);
+    if (span->spansize==sc_maxsize){
+        delete_chunk(arena,(void*)(addr_to_chunk_start(span->start_pos)+CHUNKHEADER),nullptr,dirty,false);
         return true;
     }
     return false;
@@ -946,7 +947,8 @@ void span_is_free(arena_t* arena,span_t* span,bool dirty){
         return;
     int d = (dirty) ? Y : N;
     intptr_t saddr = span->start_pos;
-    intptr_t chunkaddr = addr_to_chunk(saddr);
+    intptr_t chunkaddr = addr_to_chunk_start(saddr);
+    chunkaddr = jump_to_sbit(chunkaddr);
     int pid = addr_to_pid(chunkaddr,saddr);
     if (pid>1){
         int prev_pid = pid-1;
@@ -961,10 +963,10 @@ void span_is_free(arena_t* arena,span_t* span,bool dirty){
             pid = prev_pid;
         }
     }
-    if (pid<rc_pagenum){
+    if (pid<sc_pagenum){
         int span_pages = NEXT_ALIGN(span->spansize,PAGE)>>PAGESHIFT;
         int next_pid = pid+span_pages;
-        if (next_pid<=rc_pagenum){
+        if (next_pid<=sc_pagenum){
             sbits* sb = pid_to_sbits(chunkaddr,next_pid);
             if (ALLOC(sb)==N && DIRTY(sb)==d){
                 span_t* next = pid_to_spanmeta(chunkaddr,next_pid);
@@ -1059,7 +1061,8 @@ bool try_link_spanlist(arena_t* arena,span_t* span){
 }
 
 void dalloc_small(arena_t* arena,void* ptr){
-    intptr_t chunkaddr = addr_to_chunk((intptr_t)ptr);
+    intptr_t chunkaddr = addr_to_chunk_start((intptr_t)ptr);
+    chunkaddr = jump_to_sbit(chunkaddr);
     int pid = addr_to_pid(chunkaddr,(intptr_t)ptr);
     sbits* bs = pid_to_sbits(chunkaddr,pid);
     int binid = BINID(bs);
@@ -1137,7 +1140,8 @@ void alloc_large_batch(arena_t* arena,int binid,void** ptrs,int want){
 }
 
 void dalloc_large(arena_t* arena,void* ptr){
-    intptr_t chunkaddr = addr_to_chunk((intptr_t)ptr);
+    intptr_t chunkaddr = addr_to_chunk_start((intptr_t)ptr);
+    chunkaddr = jump_to_sbit(chunkaddr);
     int pid = addr_to_pid(chunkaddr,(intptr_t)ptr);
     span_t* span = pid_to_spanmeta(chunkaddr,pid);
     if (try_link_spanlist(arena,span))

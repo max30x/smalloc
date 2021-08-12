@@ -152,7 +152,7 @@ int main(){
 
     //smalloc_test_multithread();
 
-    smalloc_test_speed(16,10000);
+    smalloc_test_speed(32,10000);
 
     //smalloc_test_cpp_thread();
 

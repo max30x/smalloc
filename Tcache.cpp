@@ -20,7 +20,7 @@ extern "C" {
 }
 
 void init_tcaches(){
-    smutex_init(&tcs.mtx);
+    smutex_init(&tcs.mtx,false);
     slnode_init(&tcs.mlink);
     slnode_init(&tcs.tlink);
     tcs.tcsize = sizeof(tcache_t);
@@ -99,6 +99,7 @@ void tcaches_cleanup(){
 }
 
 void purge_bin(tbin_t* bin,int type,int thrownum){
+    int thrownum_ = thrownum;
     void (*dfunc)(arena_t*,void*);
     if (type==SMALL)
         dfunc = dalloc_small;
@@ -118,7 +119,7 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
             if (ptr==nullptr)
                 continue;
             addr = (intptr_t)bin->ptrs[i];
-            if (!ptr_in_chunk(chunk->start_addr,chunk->chunk_size,addr)){
+            if (!ptr_in_chunk(chunk->start_addr,addr)){
                 if (first){
                     lastid = i;
                     first = false;
@@ -137,7 +138,7 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
     while (bin->ptrs[firstid]==nullptr)
         ++firstid;
     int firstid_ = firstid;
-    int left = bin->avail-thrownum;
+    int left = bin->avail-thrownum_;
     while (left>0){
         if (bin->ptrs[firstid]==nullptr){
             int nextid = firstid+1;
@@ -223,7 +224,8 @@ void sfree(void* ptr){
         search_and_dalloc_huge(ptr);
         return;
     }
-    intptr_t chunkaddr = addr_to_chunk(_ptr);
+    intptr_t chunkaddr = addr_to_chunk_start(_ptr);
+    chunkaddr = jump_to_sbit(chunkaddr);
     int pid = addr_to_pid(chunkaddr,_ptr);
     sbits* bs = pid_to_sbits(chunkaddr,pid);
     int binid = BINID(bs);

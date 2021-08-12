@@ -96,8 +96,13 @@ struct span{
 
 using span_t = struct span;
 
-#define addr_to_chunk(ptr) \
-    ptr & (~(CHUNKSIZE-1))
+#define addr_to_chunk_start(ptr) \
+    (ptr & (~(CHUNKSIZE-1)))
+
+// addr is the start address of a chunk
+// not that 'start address' in 'chunk_node_t'
+#define jump_to_sbit(addr) \
+    (addr+NEXT_ALIGN(CHUNKHEADER,PAGE))
 
 #define SBITSSHIFT 3
 #define sbits unsigned long
@@ -241,7 +246,7 @@ int size_class(std::size_t size);
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr);
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid);
 
-bool ptr_in_chunk(intptr_t chunk_addr,std::size_t chunk_size,intptr_t addr);
+bool ptr_in_chunk(intptr_t chunk_addr,intptr_t addr);
 
 void before_arena_init();
 void before_arena_destroy();
