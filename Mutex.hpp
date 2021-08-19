@@ -12,7 +12,7 @@ struct smutex{
 
 using smutex_t = struct smutex;
 
-FORCE_INLINE static void smutex_init(smutex_t* smtx,bool recursive){
+static void smutex_init(smutex_t* smtx,bool recursive){
     pthread_mutexattr_init(&smtx->attr);
     int kind = PTHREAD_MUTEX_NORMAL;
     if (recursive) {

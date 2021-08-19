@@ -102,7 +102,7 @@ using span_t = struct span;
 // addr is the start address of a chunk
 // not that 'start address' in 'chunk_node_t'
 #define jump_to_sbit(addr) \
-    (addr+NEXT_ALIGN(CHUNKHEADER,PAGE))
+    (addr+CHUNKHEADER)
 
 #define SBITSSHIFT 3
 #define sbits unsigned long

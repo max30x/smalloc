@@ -252,8 +252,8 @@ void init_spanlists(span_list_t* slist,int sizeclass){
     slog(LEVELA,"spanlist[%d] - max_avail:%d\n",sizeclass,slist->max_avail);
 }
 
-void cal_rc_pagenum(std::size_t rcsize){
-    std::size_t a = CHUNKHEADER, b = rcsize;
+void cal_sc_pagenum(std::size_t scsize){
+    std::size_t a = CHUNKHEADER, b = scsize;
     sc_pagenum = 0;
     for (;;){
         a += sizeof(sbits)+sizeof(span_t);
@@ -263,8 +263,9 @@ void cal_rc_pagenum(std::size_t rcsize){
         ++sc_pagenum;
     }
     sc_maxsize = sc_pagenum*PAGE;
-    sc_headersize = NEXT_ALIGN(sc_pagenum*(sizeof(span_t)+sizeof(sbits)),PAGE)+(PAGE-CHUNKHEADER);
-    slog(LEVELA,"rc_pagenum:%d rc_maxsize:%lu rc_headersize:%lu\n",rc_pagenum,rc_maxsize,rc_headersize);
+    //sc_headersize = NEXT_ALIGN(sc_pagenum*(sizeof(span_t)+sizeof(sbits)),PAGE);
+    sc_headersize = scsize-sc_maxsize-CHUNKHEADER;
+    slog(LEVELA,"sc_pagenum:%d sc_maxsize:%lu sc_headersize:%lu\n",sc_pagenum,sc_maxsize,sc_headersize);
 }
 
 int size_class(std::size_t size){
@@ -369,7 +370,7 @@ void unreg_chunk(chunk_node_t* cnode,bool huge){
 void before_arena_init(){
     rb_init(&huge_chunks,bigger_ad,equal_ad);
     smutex_init(&hcs_mtx,false);
-    cal_rc_pagenum(SPANCSIZE);
+    cal_sc_pagenum(SPANCSIZE);
 }
 
 void before_arena_destroy(){
@@ -534,6 +535,7 @@ void* new_chunk(arena_t* arena,std::size_t size,bool huge){
         if (chunk->chunk_size==size){
             arena->chunk_spared = nullptr;
             chunk = make_chunknode(arena,chunk->start_addr,huge);
+            chunk_node_init(chunk,arena,chunk->chunk_size,chunk->start_addr,ISEMBED(huge));
             reg_chunk(chunk,huge);
             return (void*)chunk->start_addr;
         }

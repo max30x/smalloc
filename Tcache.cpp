@@ -132,7 +132,7 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
         }
         smutex_unlock(&arena->arena_mtx);
     }
-    if (thrownum==bin->avail)
+    if (thrownum_==bin->avail)
         return;
     int firstid = 0;
     while (bin->ptrs[firstid]==nullptr)
@@ -153,7 +153,7 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
     }
     if (firstid_==0)
         return;
-    memcpy(bin->ptrs,bin->ptrs+firstid_,left);
+    memcpy(bin->ptrs,bin->ptrs+firstid_,(bin->avail-thrownum_)*PTRSIZE);
 }
 
 void* smalloc(std::size_t size){
