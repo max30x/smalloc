@@ -76,7 +76,9 @@ void init_tcache(tcache_t* _tc,arena_t* _arena){
 
 void thread_cleanup(void* arg){
     tcache_t* _tc = (tcache_t*)arg;
+    smutex_lock(&tcs.mtx);
     return_tcache(_tc);
+    smutex_unlock(&tcs.mtx);
     atomic_fetch_sub(&_tc->arena->threads,1);
 }
 
@@ -113,7 +115,8 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
         chunk_node_t* chunk = (chunk_node_t*)chunk_addr;
         arena_t* arena = chunk->arena;
         bool first = true;
-        smutex_lock(&arena->arena_mtx);
+        if (type!=SMALL)
+            smutex_lock(&arena->arena_mtx);
         for (int i=lastid;thrownum>0&&i>=0;--i){
             void* ptr = bin->ptrs[i];
             if (ptr==nullptr)
@@ -130,7 +133,8 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
             bin->ptrs[i] = nullptr;
             --thrownum;
         }
-        smutex_unlock(&arena->arena_mtx);
+        if (type!=SMALL)
+            smutex_unlock(&arena->arena_mtx);
     }
     if (thrownum_==bin->avail)
         return;
@@ -185,8 +189,9 @@ void* smalloc(std::size_t size){
         if (tc==nullptr){
             tc = new_tcache();
             smutex_unlock(&tcs.mtx);
-            int myid = atomic_fetch_add(&no,1);
-            myid %= CPUNUM_S;
+            //int myid = atomic_fetch_add(&no,1);
+            //myid %= CPUNUM_S;
+            int myid = 0;
             arena_t* arena = &arenas[myid];
             init_tcache(tc,arena);
         }else{
@@ -226,6 +231,7 @@ void sfree(void* ptr){
     }
     intptr_t chunkaddr = addr_to_chunk_start(_ptr);
     chunkaddr = jump_to_sbit(chunkaddr);
+    malloc_assert(_ptr!=chunkaddr,"something wrong...\n");
     int pid = addr_to_pid(chunkaddr,_ptr);
     sbits* bs = pid_to_sbits(chunkaddr,pid);
     int binid = BINID(bs);

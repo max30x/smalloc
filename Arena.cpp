@@ -100,6 +100,9 @@ void chunk_dalloc(void* ptr,std::size_t size){
 }
 
 void chunk_node_init(chunk_node_t* node,arena_t* arena,std::size_t size,intptr_t addr,bool embed){
+    malloc_assert(is_alignof(addr,CHUNKSIZE),"addr is not a mutiple of CHUNKSIZE\n");
+    //malloc_assert(arena!=nullptr,"arena is null\n");
+    malloc_assert(is_multipleof(size,CHUNKSIZE),"size is not a multiple of CHUNKSIZE");
     node->arena = arena;
     if (embed) {
         size -= CHUNKHEADER;
@@ -171,6 +174,9 @@ chunk_node_t* base_alloc(arena_t* arena,int align,std::size_t size,bool exec,boo
     void* _addr = chunk_alloc(size,align,&tsize,exec);
     if (_addr==nullptr)
         return nullptr;
+
+    malloc_assert(is_alignof((intptr_t)_addr,CHUNKSIZE),"addr is not aligned\n");
+
     arena->all_size += tsize;
     intptr_t addr = (intptr_t)_addr;
     chunk_node_t* cnode = make_chunknode(arena,addr,huge);
@@ -220,6 +226,7 @@ void clear_arena(arena_t* arena){
 }
 
 int addr_to_pid(intptr_t chunkaddr,intptr_t addr){
+    malloc_assert(is_alignof(chunkaddr-CHUNKHEADER,CHUNKSIZE),"chunkaddr is not aligned\n");
     intptr_t content = chunkaddr + sc_headersize - 1;
     return NEXT_ALIGN(addr-content,PAGE)>>PAGESHIFT;
 }
@@ -233,11 +240,14 @@ void init_spanbin(spanbin_t* bin,std::size_t regsize){
     int span_minsize = 16*1024;
     int _regnum = span_minsize/regsize;
     int regnum = smax(REGMAX,_regnum);
+
+    malloc_assert(is_alignof(sc_maxsize,PAGE),"sc_headersize is not a multiple of page size\n");
     while (regnum*regsize>sc_maxsize)
         --regnum;
     bin->regnum = regnum;
     bin->regsize = regsize;
     bin->spansize = NEXT_ALIGN(regsize*regnum,PAGE);
+    malloc_assert(bin->spansize<=sc_maxsize,"spansize is too big\n");
     slog(LEVELA,"regnum:%d regsize:%lu spansize:%lu\n",regnum,regsize,bin->spansize);
 }
 
@@ -292,10 +302,12 @@ int size_class(std::size_t size){
 
 // just let chunkaddr to be the start address of sbits
 span_t* pid_to_spanmeta(intptr_t chunkaddr,int pid){
+    malloc_assert(is_alignof(chunkaddr-CHUNKHEADER,CHUNKSIZE),"chunkaddr is wrong\n");
     return (span_t*)(chunkaddr + (sc_pagenum<<SBITSSHIFT) + (pid-1)*sizeof(span_t));
 }
 
 sbits* pid_to_sbits(intptr_t chunkaddr,int pid){
+    malloc_assert(is_alignof(chunkaddr-CHUNKHEADER,CHUNKSIZE),"chunkaddr is wrong\n");
     return (sbits*)(chunkaddr + ((pid-1)<<SBITSSHIFT));
 }
 
@@ -428,6 +440,7 @@ chunk_node_t* search_chunk_from_map(arena_t* arena,std::size_t size,bool dirty){
 }
 
 chunk_node_t* make_chunknode(arena_t* arena,intptr_t start_addr,bool huge){
+    malloc_assert(is_alignof(start_addr,CHUNKSIZE),"start_addr is not aligned\n");
     chunk_node_t* cnode;
     if (likely(ISEMBED(huge)))
         cnode = (chunk_node_t*)start_addr;
@@ -443,7 +456,7 @@ chunk_node_t* split_chunk(arena_t* arena,chunk_node_t* chunk,std::size_t size){
     if (left_size>CHUNKHEADER){
         intptr_t left_addr = chunk->start_addr+size;
         left = (chunk_node_t*)left_addr;
-        chunk_node_init(left,arena,left_size,left_addr,true);
+        chunk_node_init(left,arena,left_size,left_addr,false);
         chunk->chunk_size = size;   
     }   
     return left;
@@ -461,10 +474,10 @@ chunk_node_t* chunk_from_map(arena_t* arena,std::size_t size,bool dirty,bool hug
             insert_map(arena,left,dirty);
     }
 
-    _chunk = make_chunknode(arena,_chunk->start_addr,huge);
-    chunk_node_init(_chunk,arena,_chunk->chunk_size,_chunk->start_addr,ISEMBED(huge));
-    reg_chunk(_chunk,huge);
-    return _chunk;
+    chunk_node_t* cnode = make_chunknode(arena,_chunk->start_addr,huge);
+    chunk_node_init(cnode,arena,_chunk->chunk_size,_chunk->start_addr,ISEMBED(huge));
+    reg_chunk(cnode,huge);
+    return cnode;
 }
 
 bool behind_addr(chunk_node_t* c1,chunk_node_t* c2){
@@ -534,38 +547,47 @@ void* new_chunk(arena_t* arena,std::size_t size,bool huge){
         unlink_chunkdirty_arena(arena,arena->chunk_spared);
         if (chunk->chunk_size==size){
             arena->chunk_spared = nullptr;
-            chunk = make_chunknode(arena,chunk->start_addr,huge);
-            chunk_node_init(chunk,arena,chunk->chunk_size,chunk->start_addr,ISEMBED(huge));
-            reg_chunk(chunk,huge);
-            return (void*)chunk->start_addr;
+            chunk_node_t* cnode = make_chunknode(arena,chunk->start_addr,huge);
+            chunk_node_init(cnode,arena,chunk->chunk_size,chunk->start_addr,ISEMBED(huge));
+            reg_chunk(cnode,huge);
+            malloc_assert(chunk_is_alignof(cnode->start_addr,CHUNKSIZE,huge),"start_addr (%lx) is not aligned\n",cnode->start_addr);
+            return (void*)cnode->start_addr;
         }
         arena->chunk_spared = split_chunk(arena,chunk,size);
         if (arena->chunk_spared!=nullptr)
             link_chunkdirty_arena(arena,arena->chunk_spared);
         else 
-            arena->dirty_size -= chunk->chunk_size-size;
+            arena->dirty_size -= chunk->chunk_size - size;
 
         chunk_node_t* cnode = make_chunknode(arena,chunk->start_addr,huge);
         chunk_node_init(cnode,arena,chunk->chunk_size,chunk->start_addr,ISEMBED(huge));
         reg_chunk(cnode,huge);
+        malloc_assert(chunk_is_alignof(cnode->start_addr,CHUNKSIZE,huge),"start_addr (%lx) is not aligned\n",cnode->start_addr);
         return (void*)cnode->start_addr;
     }
 
     chunk = chunk_from_map(arena,size,true,huge);
-    if (chunk!=nullptr)
+    if (chunk!=nullptr) {
+        malloc_assert(chunk_is_alignof(chunk->start_addr,CHUNKSIZE,huge),"start_addr (%lx) is not aligned\n",chunk->start_addr);
         return (void*)chunk->start_addr;
+    }
     
     chunk = chunk_from_map(arena,size,false,huge);
-    if (chunk!=nullptr)
+    if (chunk!=nullptr) {
+        malloc_assert(chunk_is_alignof(chunk->start_addr,CHUNKSIZE,huge),"start_addr (%lx) is not aligned\n",chunk->start_addr);
         return (void*)chunk->start_addr;
-        
+    }
+
     chunk_node_t* cnode = base_alloc(arena,CHUNKSIZE,size,false,huge);
+    malloc_assert(cnode!=nullptr,"fail to allocate memory from os\n");
+    malloc_assert(chunk_is_alignof(cnode->start_addr,CHUNKSIZE,huge),"start_addr (%lx) is not aligned\n",cnode->start_addr);
     reg_chunk(cnode,huge);
     return (void*)cnode->start_addr;
 }
 
 void delete_chunk(arena_t* arena,void* addr,chunk_node_t* chunk,bool dirty,bool huge){
     if (likely(chunk==nullptr)){
+        malloc_assert(addr!=nullptr,"addr should not be null\n");
         chunk_node_t snode;
         snode.start_addr = (intptr_t)addr;
         rbnode_init(&snode.anode,&snode,true);
@@ -588,6 +610,9 @@ void delete_chunk(arena_t* arena,void* addr,chunk_node_t* chunk,bool dirty,bool 
     }else{
         TORAWCHUNK(chunk);
     }
+
+    malloc_assert(is_alignof(chunk->start_addr,CHUNKSIZE),"chunk_addr is not aligned\n");
+    malloc_assert(is_multipleof(chunk->chunk_size,CHUNKSIZE),"chunk_size is not a multiple of CHUNKSIZE\n");
 
     if (!dirty){
         chunk_to_map(arena,chunk,dirty);
@@ -694,6 +719,7 @@ void sbits_small_alloc(intptr_t start_pos,std::size_t size,int binid){
 
 // chunkaddr follows chunkheader (assume there is one)
 span_t* chunk_to_bigspan(void* chunkaddr,arena_t* arena){
+    malloc_assert(is_alignof(((intptr_t)chunkaddr)-CHUNKHEADER,CHUNKSIZE),"chunkaddr is not aligned\n");
     memset(chunkaddr,0,sc_headersize);
     intptr_t caddr = (intptr_t)chunkaddr;
     span_t* span_head = pid_to_spanmeta(jump_to_sbit(caddr-CHUNKHEADER),1);
@@ -782,6 +808,10 @@ span_t* new_span(arena_t* arena,std::size_t size){
         return span;
     
     void* ptr = new_chunk(arena,SPANCSIZE,false);
+    intptr_t ptr_ = (intptr_t)ptr;
+    malloc_assert(ptr!=nullptr,"fail to allocate memory from os\n");
+    //malloc_assert(chunk_is_alignof(ptr_,CHUNKSIZE,false),"ptr (%lx) is not aligned\n",(intptr_t)ptr);
+    malloc_assert(is_alignof(ptr_-CHUNKHEADER,CHUNKSIZE),"ptr (%lx) is not aligned\n",(intptr_t)ptr);
     span = chunk_to_bigspan(ptr,arena);
     span_t* left = split_bigspan(span,size);
     sbits_large(span->start_pos,span->spansize,N,false,-1);
@@ -824,7 +854,6 @@ span_t* new_span_for_bin(arena_t* arena,int binid){
     }
     sbits_small_alloc(span->start_pos,rsize,binid);
     smutex_unlock(&arena->arena_mtx);
-
     init_span(span,rsize,bin->regsize,bin->regnum);
     span_to_bin(span,bin);
     return span;
@@ -881,7 +910,6 @@ void* find_span_and_alloc(arena_t* arena,int binid,span_t** from){
             bin->cur = span;
         }
     }
-    
     if (span==nullptr){
         span = new_span_for_bin(arena,binid);
         if (span==nullptr)
@@ -923,6 +951,7 @@ void alloc_small_batch(arena_t* arena,int binid,void** ptrs,int want){
             from = nullptr;
         }
         _ptr = find_span_and_alloc(arena,binid,&from);
+        malloc_assert(_ptr!=nullptr,"fail to get memory from os\n");
         ptrs[i] = _ptr;
     }
     smutex_unlock(&bin->mtx);
@@ -1100,8 +1129,8 @@ void dalloc_small(arena_t* arena,void* ptr){
     smutex_lock(&arena->arena_mtx);
     span_is_free(arena,span,true);
     std::size_t wanted = should_purge(arena);
-    if (unlikely(wanted>0))
-        purge(arena,wanted);
+    //if (unlikely(wanted>0))
+    //    purge(arena,wanted);
     smutex_unlock(&arena->arena_mtx);
 }
 
@@ -1115,6 +1144,7 @@ void* alloc_large(arena_t* arena,std::size_t size){
     
     smutex_lock(&arena->arena_mtx);
     span = new_span(arena,size);
+    malloc_assert(span!=nullptr,"fail to get memory from os\n");
     sbits_large(span->start_pos,span->spansize,Y,true,binid);
     smutex_unlock(&arena->arena_mtx);
     lnode_init(&span->ldirty);
@@ -1135,6 +1165,7 @@ void alloc_large_batch(arena_t* arena,int binid,void** ptrs,int want){
     smutex_lock(&arena->arena_mtx);
     for (;_get<want;++_get){
         span_t* span = new_span(arena,size);
+        malloc_assert(span!=nullptr,"fail to get memory from os\n");
         sbits_large(span->start_pos,span->spansize,Y,true,binid);
         ptrs[_get] = (void*)span->start_pos;
     }
@@ -1152,28 +1183,31 @@ void dalloc_large(arena_t* arena,void* ptr){
     smutex_lock(&arena->arena_mtx);
     span_is_free(arena,span,true);
     std::size_t wanted = should_purge(arena);
-    if (unlikely(wanted>0))
-        purge(arena,wanted);
+    //if (unlikely(wanted>0))
+    //    purge(arena,wanted);
     smutex_unlock(&arena->arena_mtx);
 }
 
 void* alloc_huge(arena_t* arena,std::size_t size){
     smutex_lock(&arena->arena_mtx);
     void* chunk = new_chunk(arena,size,true);
+    malloc_assert(chunk!=nullptr,"fail to get memory from os\n");
     smutex_unlock(&arena->arena_mtx);
     return chunk;
 }
 
 void dalloc_huge(arena_t* arena,void* ptr){
+    malloc_assert(is_alignof((intptr_t)ptr,CHUNKSIZE),"ptr is not aligned\n");
     smutex_lock(&arena->arena_mtx);
     delete_chunk(arena,ptr,nullptr,true,true);
     std::size_t wanted = should_purge(arena);
-    if (unlikely(wanted>0))
-        purge(arena,wanted);
+    //if (unlikely(wanted>0))
+    //    purge(arena,wanted);
     smutex_unlock(&arena->arena_mtx);
 }
 
 void search_and_dalloc_huge(void* ptr){
+    malloc_assert(is_alignof((intptr_t)ptr,CHUNKSIZE),"ptr is not aligned\n");
     chunk_node_t snode;
     snode.start_addr = (intptr_t)ptr;
     rbnode_init(&snode.anode,&snode,true);
@@ -1185,7 +1219,7 @@ void search_and_dalloc_huge(void* ptr){
     smutex_lock(&arena->arena_mtx);
     delete_chunk(chunk->arena,nullptr,chunk,true,true);
     std::size_t wanted = should_purge(arena);
-    if (unlikely(wanted>0))
-        purge(arena,wanted);
+    //if (unlikely(wanted>0))
+    //    purge(arena,wanted);
     smutex_unlock(&arena->arena_mtx);
 }

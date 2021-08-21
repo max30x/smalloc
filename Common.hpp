@@ -2,8 +2,11 @@
 
 #include <stdio.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <execinfo.h>
 
-//#define SINFO
+//#define MINFO
+#define MASSERT
 
 #define NEXT_ALIGN(num,align) \
     ((num+align-1) & (~(align-1)))
@@ -68,14 +71,29 @@ static inline void unlink_lnode(lnode_t* b){
     b->prev = b;
 }
 
-#define s_assert(x,s,...)               \
-do{                                     \
-    if (!(x)){                          \
-        printf("line:%d ",__LINE__);    \
-        printf(s,##__VA_ARGS__);        \
-        abort();                        \
-    }                                   \
-}while(0)
+static void gather_backtrace(){
+    void* callstack[128];
+    int i, frames = backtrace(callstack, 128);
+    char** strs = backtrace_symbols(callstack, frames);
+    for (i = 0; i < frames; ++i) {
+        printf("%s\n", strs[i]);
+    }
+    free(strs);
+}
+
+#ifdef MASSERT
+    #define malloc_assert(x,s,...)                          \
+    do{                                                     \
+        if (!(x)){                                          \
+            fprintf(stderr,"[ERROR] line:%d ",__LINE__);    \
+            fprintf(stderr,s,##__VA_ARGS__);                \
+            gather_backtrace();                              \
+            exit(-1);                                       \
+        }                                                   \
+    }while(0)
+#else
+    #define malloc_assert(x,s,...)
+#endif
 
 
 #define LEVELA 1
@@ -84,7 +102,7 @@ do{                                     \
 
 #define IOSTREAM stdout
 #define SINFO_LEVEL LEVELB
-#ifdef SINFO
+#ifdef MINFO
     #define slog(level,s,...)                                               \
     do{                                                                     \
     if (SINFO_LEVEL>=level){                                                \

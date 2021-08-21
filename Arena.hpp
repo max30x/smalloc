@@ -64,7 +64,18 @@ using mnode_t = struct mnode<T>;
 #define REGMAX 512
 
 #define is_alignof(a,b) \
-    (a % b == 0)
+    (((a) != 0) && ((a) % (b) == 0))
+
+#define is_multipleof(a,b) \
+    (((a) != 0) && ((a) % (b) == 0))
+
+// addr here should have already been moved forward because of chunkheader 
+static bool chunk_is_alignof(intptr_t addr,std::size_t align,bool huge){
+    if (!huge)
+        addr -= CHUNKHEADER;
+    bool ret = is_alignof(addr,align);
+    return ret;
+}
 
 struct span{
     intptr_t start_pos;
