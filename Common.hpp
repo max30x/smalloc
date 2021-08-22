@@ -82,17 +82,17 @@ static void gather_backtrace(){
 }
 
 #ifdef MASSERT
-    #define malloc_assert(x,s,...)                          \
+    #define m_at(x,s,...)                                   \
     do{                                                     \
         if (!(x)){                                          \
             fprintf(stderr,"[ERROR] line:%d ",__LINE__);    \
             fprintf(stderr,s,##__VA_ARGS__);                \
-            gather_backtrace();                              \
+            gather_backtrace();                             \
             exit(-1);                                       \
         }                                                   \
     }while(0)
 #else
-    #define malloc_assert(x,s,...)
+    #define m_at(x,s,...)
 #endif
 
 

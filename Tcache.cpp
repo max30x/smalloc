@@ -47,6 +47,7 @@ tcache_t* take_tcache(){
         return nullptr;
     tcache_t* _tc = node_to_struct(tcache_t,tnode,tcs.tlink.next);
     tcs.tlink.next = _tc->tnode.next;
+    m_at(_tc->arena!=nullptr,"arena should not be null\n");
     return _tc;
 }
 
@@ -75,10 +76,14 @@ void init_tcache(tcache_t* _tc,arena_t* _arena){
 }
 
 void thread_cleanup(void* arg){
+    if (!tc_inited)
+        return;
     tcache_t* _tc = (tcache_t*)arg;
     smutex_lock(&tcs.mtx);
     return_tcache(_tc);
     smutex_unlock(&tcs.mtx);
+    tc = nullptr;
+    tc_inited = false;
     atomic_fetch_sub(&_tc->arena->threads,1);
 }
 
@@ -224,14 +229,14 @@ void sfree(void* ptr){
     if (unlikely(ptr==nullptr))
         return;
     intptr_t _ptr = (intptr_t)ptr;
-    if ((_ptr&(CHUNKSIZE-1))==0){
+    if ((_ptr&(SPANCSIZE-1)) == 0){
         // todo:need a better way to tell if this is a huge chunk
         search_and_dalloc_huge(ptr);
         return;
     }
     intptr_t chunkaddr = addr_to_chunk_start(_ptr);
     chunkaddr = jump_to_sbit(chunkaddr);
-    malloc_assert(_ptr!=chunkaddr,"something wrong...\n");
+    m_at(_ptr!=chunkaddr,"something wrong...\n");
     int pid = addr_to_pid(chunkaddr,_ptr);
     sbits* bs = pid_to_sbits(chunkaddr,pid);
     int binid = BINID(bs);
