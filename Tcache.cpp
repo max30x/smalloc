@@ -127,7 +127,7 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
             if (ptr==nullptr)
                 continue;
             addr = (intptr_t)bin->ptrs[i];
-            if (type!=SMALL && !ptr_in_chunk(chunk->start_addr,addr)){
+            if (!ptr_in_chunk(chunk->start_addr,addr)){
                 if (first){
                     lastid = i;
                     first = false;
