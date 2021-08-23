@@ -127,7 +127,7 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
             if (ptr==nullptr)
                 continue;
             addr = (intptr_t)bin->ptrs[i];
-            if (!ptr_in_chunk(chunk->start_addr,addr)){
+            if (type!=SMALL && !ptr_in_chunk(chunk->start_addr,addr)){
                 if (first){
                     lastid = i;
                     first = false;
@@ -194,9 +194,8 @@ void* smalloc(std::size_t size){
         if (tc==nullptr){
             tc = new_tcache();
             smutex_unlock(&tcs.mtx);
-            //int myid = atomic_fetch_add(&no,1);
-            //myid %= CPUNUM_S;
-            int myid = 0;
+            int myid = atomic_fetch_add(&no,1);
+            myid %= CPUNUM_S;
             arena_t* arena = &arenas[myid];
             init_tcache(tc,arena);
         }else{

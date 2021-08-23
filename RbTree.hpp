@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdlib.h>
+#include <stdio.h>
+
 #include <cstdint>
 
 #define ARENA
@@ -10,6 +13,7 @@
 #endif
 
 #ifdef ARENA
+    #include "Common.hpp"
     #define EMBED
 #endif
 
@@ -39,6 +43,9 @@ struct rb_tree;
 
 template<typename T>
 struct rbnode{
+#ifdef EMBED
+    int ref;
+#endif
     T* ptr;
     bool is_red;
     struct rb_tree<T>* tree;
@@ -142,12 +149,18 @@ using rb_iter_t = struct rb_iter<T>;
 template<typename T>
 inline bool bigger(rbnode_t<T>* a,rbnode_t<T>* b){
     struct rb_tree<T>* tr = (a->tree==nullptr)?b->tree:a->tree;
+#ifdef ARENA
+    m_at(tr!=nullptr,"tree should not be null\n");
+#endif
     return tr->_bigger(a->ptr,b->ptr);
 }
 
 template<typename T>
 inline bool equal(rbnode_t<T>* a,rbnode_t<T>* b){
     struct rb_tree<T>* tr = (a->tree==nullptr)?b->tree:a->tree;
+#ifdef ARENA
+    m_at(tr!=nullptr,"tree should not be null\n");
+#endif
     return tr->_equal(a->ptr,b->ptr);
 }
 
@@ -159,6 +172,7 @@ inline void rbnode_init(rbnode_t<T>* node,T* ptr,bool is_red){
     node->rson = nullptr;
     node->is_red = is_red;
     node->ptr = ptr;
+    node->ref = 0;
 }
 
 template<typename T>
@@ -666,7 +680,11 @@ template<typename T>
 inline void rb_insert(rb_tree_t<T>* tree,rbnode_t<T>* node){
     node->tree = tree;
     node->is_red = true;
+#ifdef EMBED
 #ifdef ARENA
+    m_at(node->ref==0,"node ref (%d) should be zero\n",node->ref);
+#endif
+    ++node->ref;
     node->father = nullptr;
     node->lson = nullptr;
     node->rson = nullptr;
@@ -679,11 +697,15 @@ template<typename T>
 inline void rb_delete(rb_tree_t<T>* tree,rbnode_t<T>* node){
     tree->root = _delete(tree->root,node);
     --tree->size;
-#ifdef ARENA
+#ifdef EMBED
     node->father = nullptr;
     node->lson = nullptr;
     node->rson = nullptr;
     node->tree = nullptr;
+    --node->ref;
+#ifdef ARENA
+    m_at(node->ref==0,"node ref (%d) should be zero\n",node->ref);
+#endif
 #endif
 }
 
