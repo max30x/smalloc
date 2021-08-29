@@ -172,7 +172,9 @@ inline void rbnode_init(rbnode_t<T>* node,T* ptr,bool is_red){
     node->rson = nullptr;
     node->is_red = is_red;
     node->ptr = ptr;
+#ifdef EMBED
     node->ref = 0;
+#endif
 }
 
 template<typename T>
