@@ -101,7 +101,7 @@ void chunk_dalloc(void* ptr,std::size_t size){
 
 void chunk_node_init(chunk_node_t* node,arena_t* arena,std::size_t size,intptr_t addr,bool embed){
     m_at(is_alignof(addr,CHUNKSIZE),"addr is not a mutiple of CHUNKSIZE\n");
-    m_at(is_multipleof(size,CHUNKSIZE),"size is not a multiple of CHUNKSIZE");
+    m_at(is_multipleof(size,CHUNKSIZE),"size is not a multiple of CHUNKSIZE\n");
     node->arena = arena;
     if (embed) {
         size -= CHUNKHEADER;
@@ -871,11 +871,11 @@ span_t* new_span_for_bin(arena_t* arena,int binid){
 }
 
 bool span_is_on_list(span_t* span){
-    return span->next_free==span->start_pos+span->spansize;
+    return (span->next_free+span->regsize) > (span->start_pos+span->spansize);
 }
 
 bool span_is_full(span_t* span){
-    return span->nfree==0 && span->next_free==span->start_pos+span->spansize;
+    return (span->nfree==0) && ((span->next_free+span->regsize)>(span->start_pos+span->spansize));
 }
 
 void* alloc_reg(span_t* span){

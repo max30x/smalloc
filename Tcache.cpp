@@ -113,60 +113,15 @@ void purge_bin(tbin_t* bin,int type,int thrownum){
     else
         dfunc = dalloc_large;
 
-    int lastid = bin->avail-1;
-    while (thrownum>0){
-        intptr_t addr = (intptr_t)bin->ptrs[lastid];
+    for (int i=bin->avail-1;thrownum>0&&i>=0;--i,--thrownum){
+        void* ptr = bin->ptrs[i];
+        intptr_t addr = (intptr_t)bin->ptrs[i];
         intptr_t chunk_addr = addr & ~(SPANCSIZE-1);
         chunk_node_t* chunk = (chunk_node_t*)chunk_addr;
         arena_t* arena = chunk->arena;
-        bool first = true;
-        if (type!=SMALL)
-            smutex_lock(&arena->arena_mtx);
-        for (int i=lastid;thrownum>0&&i>=0;--i){
-            void* ptr = bin->ptrs[i];
-            if (ptr==nullptr)
-                continue;
-            addr = (intptr_t)bin->ptrs[i];
-            if (type==SMALL){
-                chunk_addr = addr & ~(SPANCSIZE-1);
-                chunk = (chunk_node_t*)chunk_addr;
-                arena = chunk->arena;
-            } else if (!ptr_in_chunk(chunk->start_addr,addr)){
-                if (first){
-                    lastid = i;
-                    first = false;
-                }
-                continue;
-            }
-            dfunc(arena,(void*)addr);
-            bin->ptrs[i] = nullptr;
-            --thrownum;
-        }
-        if (type!=SMALL)
-            smutex_unlock(&arena->arena_mtx);
+        dfunc(arena,(void*)addr);
+        bin->ptrs[i] = nullptr;
     }
-    if (thrownum_==bin->avail)
-        return;
-    int firstid = 0;
-    while (bin->ptrs[firstid]==nullptr)
-        ++firstid;
-    int firstid_ = firstid;
-    int left = bin->avail-thrownum_;
-    while (left>0){
-        if (bin->ptrs[firstid]==nullptr){
-            int nextid = firstid+1;
-            while (bin->ptrs[nextid]==nullptr)
-                ++nextid;
-            void* ptr_ = bin->ptrs[nextid];
-            bin->ptrs[nextid] = nullptr;
-            bin->ptrs[firstid] = ptr_;
-        }
-        ++firstid;
-        --left;
-    }
-    if (firstid_==0)
-        return;
-    memcpy(bin->ptrs,bin->ptrs+firstid_,(bin->avail-thrownum_)*PTRSIZE);
 }
 
 void* smalloc(std::size_t size){
@@ -213,7 +168,7 @@ void* smalloc(std::size_t size){
     int binid = size_class(size);
     if (likely(binid!=-1)){
         tbin_t* tbin = &tc->bins[binid];
-        if (tbin->avail==0){
+        if (unlikely(tbin->avail==0)){
             int _ratio = (tbin->ratio!=0) ? --tbin->ratio : 0;
             int fillnum = tbin->ncached >> _ratio;
             (binid<NBINS) ? alloc_small_batch(tc->arena,binid,tbin->ptrs,fillnum)
@@ -221,8 +176,7 @@ void* smalloc(std::size_t size){
             tbin->avail += fillnum;
             slog(LEVELB,"fill tbin(%d),fill %d items\n",binid,fillnum);
         }
-        void* ret = tbin->ptrs[tbin->avail-1];
-        --tbin->avail;
+        void* ret = tbin->ptrs[--tbin->avail];
         return ret;
     }
     return alloc_huge(tc->arena,size);

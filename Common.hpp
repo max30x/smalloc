@@ -6,7 +6,7 @@
 #include <execinfo.h>
 
 //#define MINFO
-#define MASSERT
+//#define MASSERT
 
 #define NEXT_ALIGN(num,align) \
     ((num+align-1) & (~(align-1)))
